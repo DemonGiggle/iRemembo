@@ -304,23 +304,7 @@ def upload_photo(cfg: dict, photo_id: int, thumb_path: str, dropbox_path: str, s
         conn.commit()
 
 
-def refresh_row(cfg: dict, photo_id: int):
-    with sqlite3.connect(cfg['db_path']) as conn:
-        conn.row_factory = sqlite3.Row
-        return conn.execute(
-            '''
-            SELECT id, source_path, thumb_path, dropbox_path, sha256, created_at, noted_at,
-                   user_note, summary, ocr_text, tags_json, entities_json,
-                   embedding_model, embedding_ref, status
-            FROM photos WHERE id = ?
-            ''',
-            (photo_id,),
-        ).fetchone()
-
-
 def maybe_embed_photo(cfg: dict, photo: dict, model_hint: str = '') -> dict:
-    if photo.get('embedding_ref'):
-        return photo
     text = build_embedding_input(
         photo.get('summary', ''),
         photo.get('ocr_text', ''),
@@ -336,18 +320,6 @@ def maybe_embed_photo(cfg: dict, photo: dict, model_hint: str = '') -> dict:
     photo['embedding_model'] = model
     photo['embedding_ref'] = f'sqlite:photo_embeddings:{photo["id"]}'
     return photo
-
-
-def finalize_existing_photo(cfg: dict, photo: dict, auto_embed: bool, final_status: str, model_hint: str = '') -> dict:
-    photo = dict(photo)
-    needs_upload = photo.get('status') != final_status
-    if auto_embed:
-        photo = maybe_embed_photo(cfg, photo, model_hint=model_hint)
-    if needs_upload:
-        upload_photo(cfg, photo['id'], photo['thumb_path'], photo['dropbox_path'], status=final_status)
-        photo['status'] = final_status
-    fresh = refresh_row(cfg, photo['id'])
-    return dict(fresh) if fresh else photo
 
 
 def cmd_init(args):
@@ -500,14 +472,7 @@ def remember_prepared(args, cfg: dict):
         prepared = prepare_photo_row(cfg, args)
         existing = find_photo_by_sha(conn, prepared['sha256'])
         if existing and args.dedup == 'return-existing':
-            row = finalize_existing_photo(
-                cfg,
-                dict(existing),
-                auto_embed=args.auto_embed,
-                final_status=args.final_status,
-                model_hint=args.embedding_model,
-            )
-            print(json.dumps({'dedup': True, 'record': row}, ensure_ascii=False, indent=2))
+            print(json.dumps({'dedup': True, 'record': dict(existing)}, ensure_ascii=False, indent=2))
             return
         row = insert_photo(conn, cfg, args)
     if args.auto_embed:
@@ -657,7 +622,7 @@ def build_parser():
     s.add_argument('--organizations', nargs='*', default=[])
     s.add_argument('--objects', nargs='*', default=[])
     s.add_argument('--embedding-model', default='')
-    s.add_argument('--embedding-ref', default='chat-analysis')
+    s.add_argument('--embedding-ref', default='')
     s.add_argument('--dropbox-path', default='')
     s.add_argument('--status', default='annotated')
     s.add_argument('--final-status', default='uploaded')

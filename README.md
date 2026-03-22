@@ -54,8 +54,9 @@ python3 src/photo_memory.py fetch 1
 2. `remember-chat` 吃固定 JSON：`summary / tags / entities / ocr_text`
 3. CLI 裡的 `remember --auto-analyze` 只會跑 `analysis_command`，不會用 OpenAI vision
 4. 若要同時跑向量：`remember-chat ... --auto-embed` 或 `remember ... --auto-embed`
-5. 預設會用 SHA-256 去重；遇到同圖時，會優先補齊缺的 upload / embedding / 最終狀態，再回傳既有紀錄；若真的要重建可加 `--dedup allow-new`
-6. 若要拆步驟：`add` 建立本機索引紀錄
+5. 預設會用 SHA-256 去重；開發期先不做 reconcile，遇到同圖就直接回傳既有紀錄；若真的要重建可加 `--dedup allow-new`
+6. 開發期主原則：單一路徑、失敗就停，不偷偷補中間步驟
+7. 若要拆步驟：`add` 建立本機索引紀錄
 7. `annotate` 寫回 OCR / 摘要 / 標籤 / entities / embedding 參考
 8. `embed` 依據目前 metadata 產生並落地保存 embedding
 9. `inspect` 可先檢查一張圖是否已經在庫裡
