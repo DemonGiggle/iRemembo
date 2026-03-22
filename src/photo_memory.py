@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import math
 import os
 import shutil
 import sqlite3
@@ -380,7 +381,7 @@ def cmd_fetch(args):
     with sqlite3.connect(cfg['db_path']) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
-            'SELECT id, sha256, thumb_path, dropbox_path, summary, status FROM photos WHERE id = ?',
+            'SELECT id, sha256, dropbox_path, summary, status FROM photos WHERE id = ?',
             (args.id,),
         ).fetchone()
         if not row:
@@ -541,6 +542,93 @@ def cmd_inspect(args):
     print(json.dumps(out, ensure_ascii=False, indent=2))
 
 
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def cmd_search(args):
+    cfg = load_config(resolve_config_path(args.config))
+    ensure_db(cfg)
+    query_text = args.query.strip()
+    if not query_text:
+        raise SystemExit('query is required')
+
+    q = f'%{query_text}%'
+    with sqlite3.connect(cfg['db_path']) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            '''
+            SELECT p.id, p.noted_at, p.summary, p.user_note, p.ocr_text, p.tags_json,
+                   p.entities_json, p.dropbox_path, p.status,
+                   e.model AS embedding_model, e.input_text, e.vector_json
+            FROM photos p
+            LEFT JOIN photo_embeddings e ON e.photo_id = p.id
+            WHERE p.summary LIKE ? OR p.user_note LIKE ? OR p.ocr_text LIKE ? OR p.tags_json LIKE ? OR p.entities_json LIKE ? OR e.input_text LIKE ?
+            ORDER BY p.id DESC
+            ''',
+            (q, q, q, q, q, q),
+        ).fetchall()
+
+    query_model = ''
+    query_vector = []
+    if args.semantic:
+        query_model, query_vector = create_embedding(query_text, args.model or cfg.get('embedding_model', 'text-embedding-3-small'))
+
+    scored = []
+    for row in rows:
+        item = dict(row)
+        keyword_score = 0
+        haystacks = [
+            item.get('summary') or '',
+            item.get('user_note') or '',
+            item.get('ocr_text') or '',
+            item.get('tags_json') or '',
+            item.get('entities_json') or '',
+            item.get('input_text') or '',
+        ]
+        q_lower = query_text.lower()
+        for text in haystacks:
+            if q_lower in text.lower():
+                keyword_score += 1
+
+        semantic_score = 0.0
+        if query_vector and item.get('vector_json'):
+            try:
+                semantic_score = cosine_similarity(query_vector, json.loads(item['vector_json']))
+            except Exception:
+                semantic_score = 0.0
+
+        final_score = keyword_score + semantic_score
+        if keyword_score == 0 and semantic_score == 0:
+            continue
+        scored.append({
+            'id': item['id'],
+            'summary': item['summary'],
+            'dropbox_path': item['dropbox_path'],
+            'status': item['status'],
+            'keyword_score': keyword_score,
+            'semantic_score': round(semantic_score, 6),
+            'score': round(final_score, 6),
+            'embedding_model': item.get('embedding_model') or '',
+        })
+
+    scored.sort(key=lambda x: (x['score'], x['id']), reverse=True)
+    result = {
+        'query': query_text,
+        'semantic': bool(args.semantic),
+        'query_model': query_model,
+        'results': scored[:args.limit],
+    }
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 def build_parser():
     p = argparse.ArgumentParser(description='iRemembo MVP')
     p.add_argument(
@@ -625,6 +713,13 @@ def build_parser():
     s.add_argument('query')
     s.add_argument('--limit', type=int, default=10)
     s.set_defaults(func=cmd_find)
+
+    s = sub.add_parser('search')
+    s.add_argument('query')
+    s.add_argument('--limit', type=int, default=10)
+    s.add_argument('--semantic', action='store_true')
+    s.add_argument('--model', default='')
+    s.set_defaults(func=cmd_search)
 
     s = sub.add_parser('upload')
     s.add_argument('id', type=int)

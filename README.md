@@ -60,6 +60,8 @@ python3 src/photo_memory.py annotate 1 --summary "更新後摘要" --tags "標�
 python3 src/photo_memory.py embed 1
 python3 src/photo_memory.py inspect /path/to/image.jpg
 python3 src/photo_memory.py find 關鍵字
+python3 src/photo_memory.py search 關鍵字
+python3 src/photo_memory.py search 關鍵字 --semantic
 python3 src/photo_memory.py fetch 1
 ```
 
@@ -83,6 +85,7 @@ The actual embedding vector is stored in `photo_embeddings`.
 - CLI does not use OpenAI vision fallback.
 - Embeddings currently use OpenAI `/v1/embeddings` when enabled.
 - Duplicate detection is SHA-256 based.
+- Retrieval now has two layers: `find` for plain keyword matching, and `search --semantic` for embedding-based ranking.
 
 ## Config example
 ```json

@@ -44,10 +44,15 @@
 - Embeddings are generated from summary + note + OCR + tags + entities text
 - Embedding vectors are stored locally in SQLite so repo stays clean
 
+## Retrieval
+- `find` is the simple keyword-first lookup path over stored metadata text
+- `search --semantic` embeds the query text, compares it against locally stored vectors, and returns ranked candidates
+- Retrieval should query local DB first, then fetch from Dropbox only when the user wants the image back
+
 ## Future work
 - Harden the interactive chat-driven ingest path now that it is wired
 - Better OCR engine installation / benchmarking
 - Improve duplicate policy beyond exact SHA match
-- Embedding-based retrieval ranking
+- Better hybrid retrieval weighting / reranking
 - Tooling to fetch remembered images from Dropbox back to local/send-back flows
 - Alternate storage backends
