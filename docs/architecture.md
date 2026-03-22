@@ -20,7 +20,8 @@
 - `remember` remains the CLI ingest path for local/scripted use
 - `remember` / `remember-chat` / `add` do SHA-256-based duplicate detection by default, so the same source image does not keep creating extra rows unless explicitly allowed
 - Development mode currently does **not** reconcile partial rows; if a run fails midway, leave the row as-is, inspect it, and rerun or rebuild explicitly
-- `add` creates the initial record and retained image when a split workflow is preferred
+- The DB keeps Dropbox identity + metadata, not local source/thumb paths; local thumbnails are treated as temporary implementation detail
+- `add` creates the initial record when a split workflow is preferred
 - `annotate` is the explicit writeback point for OCR text, summary, tags, entities, and embedding references
 - `inspect` is the lightweight preflight check for “is this image already remembered?”
 - This keeps later vision/OCR pipelines replaceable without changing DB ownership flow

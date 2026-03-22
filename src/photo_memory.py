@@ -15,8 +15,6 @@ from pathlib import Path
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS photos (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  source_path TEXT NOT NULL,
-  thumb_path TEXT,
   dropbox_path TEXT,
   sha256 TEXT NOT NULL,
   created_at TEXT NOT NULL,
@@ -256,8 +254,6 @@ def prepare_photo_row(cfg: dict, args) -> dict:
     sha = sha256_file(src)
     thumb = make_thumb(src, Path(cfg['thumb_dir']), sha)
     return {
-        'source_path': str(src),
-        'thumb_path': str(thumb),
         'dropbox_path': args.dropbox_path or f"{cfg['dropbox_base']}/{thumb.name}",
         'sha256': sha,
         'created_at': datetime.fromtimestamp(src.stat().st_mtime, timezone.utc).isoformat(),
@@ -277,7 +273,7 @@ def find_photo_by_sha(conn, sha: str):
     conn.row_factory = sqlite3.Row
     return conn.execute(
         '''
-        SELECT id, source_path, thumb_path, dropbox_path, sha256, created_at, noted_at,
+        SELECT id, dropbox_path, sha256, created_at, noted_at,
                user_note, summary, ocr_text, tags_json, entities_json,
                embedding_model, embedding_ref, status
         FROM photos WHERE sha256 = ? ORDER BY id DESC LIMIT 1
@@ -295,9 +291,12 @@ def insert_photo(conn, cfg: dict, args) -> dict:
     return {'id': cur.lastrowid, **row}
 
 
-def upload_photo(cfg: dict, photo_id: int, thumb_path: str, dropbox_path: str, status: str = 'uploaded'):
+def upload_photo(cfg: dict, photo_id: int, image_path: str, dropbox_path: str, status: str = 'uploaded'):
+    src = Path(image_path).expanduser().resolve()
+    sha = sha256_file(src)
+    thumb = make_thumb(src, Path(cfg['thumb_dir']), sha)
     subprocess.run([
-        sys.executable, cfg['dropbox_tool'], 'upload', thumb_path, dropbox_path, '--overwrite'
+        sys.executable, cfg['dropbox_tool'], 'upload', str(thumb), dropbox_path, '--overwrite'
     ], check=True)
     with sqlite3.connect(cfg['db_path']) as conn:
         conn.execute('UPDATE photos SET status = ?, noted_at = ? WHERE id = ?', (status, utc_now(), photo_id))
@@ -372,13 +371,7 @@ def cmd_find(args):
 def cmd_upload(args):
     cfg = load_config(resolve_config_path(args.config))
     ensure_db(cfg)
-    with sqlite3.connect(cfg['db_path']) as conn:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute('SELECT id, thumb_path, dropbox_path FROM photos WHERE id = ?', (args.id,)).fetchone()
-        if not row:
-            raise SystemExit(f'no photo id={args.id}')
-    upload_photo(cfg, args.id, row['thumb_path'], row['dropbox_path'])
-    print(json.dumps({'id': args.id, 'dropbox_path': row['dropbox_path'], 'status': 'uploaded'}, ensure_ascii=False, indent=2))
+    raise SystemExit('upload by id is disabled in the current schema: use remember/remember-chat at ingest time')
 
 
 def cmd_fetch(args):
@@ -411,14 +404,9 @@ def cmd_fetch(args):
 def cmd_annotate(args):
     cfg = load_config(resolve_config_path(args.config))
     ensure_db(cfg)
-    ocr_text = args.ocr_text
     if args.auto_ocr:
-        with sqlite3.connect(cfg['db_path']) as conn:
-            conn.row_factory = sqlite3.Row
-            src = conn.execute('SELECT source_path FROM photos WHERE id = ?', (args.id,)).fetchone()
-            if not src:
-                raise SystemExit(f'no photo id={args.id}')
-        ocr_text = maybe_run_ocr(Path(src['source_path']), cfg)
+        raise SystemExit('annotate --auto-ocr is disabled in the current schema: OCR should happen before write-in')
+    ocr_text = args.ocr_text
     patch = {
         'noted_at': utc_now(),
         'summary': args.summary,
@@ -477,13 +465,12 @@ def remember_prepared(args, cfg: dict):
         row = insert_photo(conn, cfg, args)
     if args.auto_embed:
         row = maybe_embed_photo(cfg, row, model_hint=args.embedding_model)
-    upload_photo(cfg, row['id'], row['thumb_path'], row['dropbox_path'], status=args.final_status)
+    upload_photo(cfg, row['id'], args.image, row['dropbox_path'], status=args.final_status)
     row['status'] = args.final_status
     result = {
         'id': row['id'],
         'summary': row['summary'],
         'dropbox_path': row['dropbox_path'],
-        'thumb_path': row['thumb_path'],
         'embedding_model': row['embedding_model'],
         'embedding_ref': row['embedding_ref'],
         'status': args.final_status,

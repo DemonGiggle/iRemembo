@@ -56,13 +56,14 @@ python3 src/photo_memory.py fetch 1
 4. 若要同時跑向量：`remember-chat ... --auto-embed` 或 `remember ... --auto-embed`
 5. 預設會用 SHA-256 去重；開發期先不做 reconcile，遇到同圖就直接回傳既有紀錄；若真的要重建可加 `--dedup allow-new`
 6. 開發期主原則：單一路徑、失敗就停，不偷偷補中間步驟
-7. 若要拆步驟：`add` 建立本機索引紀錄
-7. `annotate` 寫回 OCR / 摘要 / 標籤 / entities / embedding 參考
-8. `embed` 依據目前 metadata 產生並落地保存 embedding
-9. `inspect` 可先檢查一張圖是否已經在庫裡
-10. `upload` 把縮圖送到 Dropbox
-11. `find` 用關鍵字找圖
-12. `fetch` 把已記住的圖從 Dropbox 拉回本機
+7. DB 現在只保留 Dropbox 路徑與 metadata，不保留 `source_path` / `thumb_path`
+8. 若要拆步驟：`add` 建立本機索引紀錄
+9. `annotate` 寫回 OCR / 摘要 / 標籤 / entities / embedding 參考
+10. `embed` 依據目前 metadata 產生並落地保存 embedding
+11. `inspect` 可先檢查一張圖是否已經在庫裡
+12. `upload` 指令目前停用；上傳應在 ingest 當下完成
+13. `find` 用關鍵字找圖
+14. `fetch` 把已記住的圖從 Dropbox 拉回本機
 
 ## OCR / analysis / embedding notes
 - OCR 目前是可插拔：
