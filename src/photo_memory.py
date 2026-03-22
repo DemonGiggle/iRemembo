@@ -375,30 +375,57 @@ def cmd_upload(args):
     raise SystemExit('upload by id is disabled in the current schema: use remember/remember-chat at ingest time')
 
 
-def cmd_fetch(args):
-    cfg = load_config(resolve_config_path(args.config))
-    ensure_db(cfg)
+def fetch_photo_to_path(cfg: dict, photo_id: int, out: str = '') -> dict:
     with sqlite3.connect(cfg['db_path']) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             'SELECT id, sha256, dropbox_path, summary, status FROM photos WHERE id = ?',
-            (args.id,),
+            (photo_id,),
         ).fetchone()
         if not row:
-            raise SystemExit(f'no photo id={args.id}')
+            raise SystemExit(f'no photo id={photo_id}')
 
     default_out = Path(cfg['thumb_dir']) / 'fetched' / Path(row['dropbox_path']).name
-    out_path = Path(args.out).expanduser().resolve() if args.out else default_out
+    out_path = Path(out).expanduser().resolve() if out else default_out
     out_path.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run([
         sys.executable, cfg['dropbox_tool'], 'download', row['dropbox_path'], str(out_path)
     ], check=True)
-    print(json.dumps({
-        'id': args.id,
+    return {
+        'id': row['id'],
         'summary': row['summary'],
         'dropbox_path': row['dropbox_path'],
         'local_path': str(out_path),
         'status': row['status'],
+    }
+
+
+def cmd_fetch(args):
+    cfg = load_config(resolve_config_path(args.config))
+    ensure_db(cfg)
+    print(json.dumps(fetch_photo_to_path(cfg, args.id, args.out), ensure_ascii=False, indent=2))
+
+
+def cmd_recall(args):
+    cfg = load_config(resolve_config_path(args.config))
+    ensure_db(cfg)
+    result = run_search(cfg, args.query.strip(), semantic=args.semantic, model=args.model, limit=args.limit)
+    if not result['results']:
+        print(json.dumps({
+            'query': result['query'],
+            'semantic': result['semantic'],
+            'query_model': result['query_model'],
+            'match': None,
+        }, ensure_ascii=False, indent=2))
+        return
+    best = result['results'][0]
+    fetched = fetch_photo_to_path(cfg, best['id'], args.out)
+    print(json.dumps({
+        'query': result['query'],
+        'semantic': result['semantic'],
+        'query_model': result['query_model'],
+        'match': best,
+        'fetched': fetched,
     }, ensure_ascii=False, indent=2))
 
 
@@ -553,10 +580,7 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-def cmd_search(args):
-    cfg = load_config(resolve_config_path(args.config))
-    ensure_db(cfg)
-    query_text = args.query.strip()
+def run_search(cfg: dict, query_text: str, semantic: bool = False, model: str = '', limit: int = 10) -> dict:
     if not query_text:
         raise SystemExit('query is required')
 
@@ -578,8 +602,8 @@ def cmd_search(args):
 
     query_model = ''
     query_vector = []
-    if args.semantic:
-        query_model, query_vector = create_embedding(query_text, args.model or cfg.get('embedding_model', 'text-embedding-3-small'))
+    if semantic:
+        query_model, query_vector = create_embedding(query_text, model or cfg.get('embedding_model', 'text-embedding-3-small'))
 
     scored = []
     for row in rows:
@@ -620,12 +644,18 @@ def cmd_search(args):
         })
 
     scored.sort(key=lambda x: (x['score'], x['id']), reverse=True)
-    result = {
+    return {
         'query': query_text,
-        'semantic': bool(args.semantic),
+        'semantic': bool(semantic),
         'query_model': query_model,
-        'results': scored[:args.limit],
+        'results': scored[:limit],
     }
+
+
+def cmd_search(args):
+    cfg = load_config(resolve_config_path(args.config))
+    ensure_db(cfg)
+    result = run_search(cfg, args.query.strip(), semantic=args.semantic, model=args.model, limit=args.limit)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
@@ -729,6 +759,14 @@ def build_parser():
     s.add_argument('id', type=int)
     s.add_argument('--out', default='')
     s.set_defaults(func=cmd_fetch)
+
+    s = sub.add_parser('recall')
+    s.add_argument('query')
+    s.add_argument('--limit', type=int, default=10)
+    s.add_argument('--semantic', action='store_true')
+    s.add_argument('--model', default='')
+    s.add_argument('--out', default='')
+    s.set_defaults(func=cmd_recall)
 
     s = sub.add_parser('annotate')
     s.add_argument('id', type=int)
