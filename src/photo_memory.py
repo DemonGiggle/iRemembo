@@ -203,6 +203,42 @@ def cmd_fetch(args):
     }, ensure_ascii=False, indent=2))
 
 
+def cmd_annotate(args):
+    cfg = load_config(resolve_config_path(args.config))
+    ensure_db(cfg)
+    tags = [t.strip() for t in (args.tags or '').split(',') if t.strip()]
+    entities = {
+        'dates': args.dates or [],
+        'people': args.people or [],
+        'places': args.places or [],
+        'objects': args.objects or [],
+    }
+    patch = {
+        'noted_at': utc_now(),
+        'summary': args.summary,
+        'ocr_text': args.ocr_text,
+        'tags_json': json.dumps(tags, ensure_ascii=False),
+        'entities_json': json.dumps(entities, ensure_ascii=False),
+        'embedding_model': args.embedding_model,
+        'embedding_ref': args.embedding_ref,
+        'status': args.status,
+    }
+    assignments = ', '.join(f'{k} = ?' for k in patch)
+    values = list(patch.values()) + [args.id]
+    with sqlite3.connect(cfg['db_path']) as conn:
+        conn.row_factory = sqlite3.Row
+        exists = conn.execute('SELECT id FROM photos WHERE id = ?', (args.id,)).fetchone()
+        if not exists:
+            raise SystemExit(f'no photo id={args.id}')
+        conn.execute(f'UPDATE photos SET {assignments} WHERE id = ?', values)
+        conn.commit()
+        row = conn.execute(
+            'SELECT id, noted_at, summary, ocr_text, tags_json, entities_json, embedding_model, embedding_ref, status FROM photos WHERE id = ?',
+            (args.id,),
+        ).fetchone()
+    print(json.dumps(dict(row), ensure_ascii=False, indent=2))
+
+
 def build_parser():
     p = argparse.ArgumentParser(description='iRemembo MVP')
     p.add_argument(
@@ -248,6 +284,20 @@ def build_parser():
     s.add_argument('id', type=int)
     s.add_argument('--out', default='')
     s.set_defaults(func=cmd_fetch)
+
+    s = sub.add_parser('annotate')
+    s.add_argument('id', type=int)
+    s.add_argument('--summary', default='')
+    s.add_argument('--ocr-text', default='')
+    s.add_argument('--tags', default='')
+    s.add_argument('--dates', nargs='*', default=[])
+    s.add_argument('--people', nargs='*', default=[])
+    s.add_argument('--places', nargs='*', default=[])
+    s.add_argument('--objects', nargs='*', default=[])
+    s.add_argument('--embedding-model', default='')
+    s.add_argument('--embedding-ref', default='')
+    s.add_argument('--status', default='annotated')
+    s.set_defaults(func=cmd_annotate)
 
     return p
 

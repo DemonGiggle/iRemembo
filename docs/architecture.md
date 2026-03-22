@@ -15,6 +15,11 @@
 - Tokens remain in local secret storage only
 - SQLite DB and thumbnails remain local-only by default
 
+## Current writeback boundary
+- `add` creates the initial record and retained image
+- `annotate` is the explicit writeback point for OCR text, summary, tags, entities, and embedding references
+- This keeps later vision/OCR pipelines replaceable without changing DB ownership flow
+
 ## Future work
 - Automatic OCR/summary/tag extraction hook
 - Embedding generation + local/vector lookup
