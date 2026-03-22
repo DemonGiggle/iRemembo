@@ -26,7 +26,8 @@
 ## OCR / analysis / embedding boundary
 - OCR is pluggable: local config may define `ocr_command`, otherwise the app tries local `tesseract` if available
 - Analysis is also pluggable: local config may define `analysis_command`
-- If no `analysis_command` is configured, the app can try OpenAI vision via `/v1/chat/completions`
+- If no `analysis_command` is configured, CLI-side image understanding is skipped
+- Interactive chat-side image understanding is a separate path and is intentionally outside this repo CLI flow
 - Analysis output is normalized into fixed fields:
   - `summary`
   - `tags`
@@ -41,6 +42,7 @@
 - Embedding vectors are stored locally in SQLite so repo stays clean
 
 ## Future work
+- Wire an interactive chat-driven ingest path into iRemembo writeback
 - Better OCR engine installation / benchmarking
 - Improve duplicate policy beyond exact SHA match
 - Embedding-based retrieval ranking

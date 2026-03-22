@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import base64
 import hashlib
 import json
 import os
@@ -167,63 +166,6 @@ def run_analysis_command(image_path: Path, cfg: dict, ocr_text: str, user_note: 
     return normalize_analysis(json.loads(result.stdout))
 
 
-def openai_analyze_image(image_path: Path, cfg: dict, ocr_text: str, user_note: str) -> dict:
-    api_key = os.environ.get('OPENAI_API_KEY', '')
-    if not api_key:
-        return {}
-    model = cfg.get('vision_model', 'gpt-4.1-mini')
-    mime = 'image/jpeg'
-    suffix = image_path.suffix.lower()
-    if suffix == '.png':
-        mime = 'image/png'
-    elif suffix == '.webp':
-        mime = 'image/webp'
-    b64 = base64.b64encode(image_path.read_bytes()).decode()
-    prompt = (
-        'Analyze this image for a personal photo-memory system. '
-        'Return strict JSON only with keys: summary, tags, entities, ocr_text. '
-        'summary should be concise Traditional Chinese. '
-        'tags should be 3 to 8 short noun-like tags. '
-        'entities must be an object with arrays for dates, times, people, places, organizations, objects. '
-        'If unsure, use empty strings or empty arrays. Do not invent facts. '
-        f'Existing OCR text: {ocr_text or ""}. '
-        f'User note: {user_note or ""}.'
-    )
-    payload = {
-        'model': model,
-        'response_format': {'type': 'json_object'},
-        'messages': [
-            {
-                'role': 'user',
-                'content': [
-                    {'type': 'text', 'text': prompt},
-                    {'type': 'image_url', 'image_url': {'url': f'data:{mime};base64,{b64}'}},
-                ],
-            }
-        ],
-        'temperature': 0.2,
-    }
-    req = urllib.request.Request(
-        'https://api.openai.com/v1/chat/completions',
-        data=json.dumps(payload).encode(),
-        headers={
-            'Authorization': f'Bearer {api_key}',
-            'Content-Type': 'application/json',
-        },
-        method='POST',
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=120) as r:
-            resp = json.load(r)
-    except Exception:
-        return {}
-    try:
-        content = resp['choices'][0]['message']['content']
-        return normalize_analysis(json.loads(content))
-    except Exception:
-        return {}
-
-
 def analyze_image(image_path: Path, cfg: dict, user_note: str = '', ocr_text: str = '') -> dict:
     try:
         via_cmd = run_analysis_command(image_path, cfg, ocr_text, user_note)
@@ -231,9 +173,6 @@ def analyze_image(image_path: Path, cfg: dict, user_note: str = '', ocr_text: st
             return via_cmd
     except Exception:
         pass
-    via_openai = openai_analyze_image(image_path, cfg, ocr_text, user_note)
-    if via_openai:
-        return via_openai
     return {'summary': '', 'tags': [], 'entities': {}, 'ocr_text': ocr_text or ''}
 
 
