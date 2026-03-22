@@ -208,13 +208,13 @@ def store_embedding(cfg: dict, photo_id: int, model: str, input_text: str, vecto
         conn.commit()
 
 
-def insert_photo(conn, cfg: dict, args) -> dict:
+def prepare_photo_row(cfg: dict, args) -> dict:
     src = Path(args.image).expanduser().resolve()
     if not src.exists():
         raise SystemExit(f'missing image: {src}')
     sha = sha256_file(src)
     thumb = make_thumb(src, Path(cfg['thumb_dir']), sha)
-    row = {
+    return {
         'source_path': str(src),
         'thumb_path': str(thumb),
         'dropbox_path': args.dropbox_path or f"{cfg['dropbox_base']}/{thumb.name}",
@@ -230,6 +230,23 @@ def insert_photo(conn, cfg: dict, args) -> dict:
         'embedding_ref': args.embedding_ref,
         'status': args.status,
     }
+
+
+def find_photo_by_sha(conn, sha: str):
+    conn.row_factory = sqlite3.Row
+    return conn.execute(
+        '''
+        SELECT id, source_path, thumb_path, dropbox_path, sha256, created_at, noted_at,
+               user_note, summary, ocr_text, tags_json, entities_json,
+               embedding_model, embedding_ref, status
+        FROM photos WHERE sha256 = ? ORDER BY id DESC LIMIT 1
+        ''',
+        (sha,),
+    ).fetchone()
+
+
+def insert_photo(conn, cfg: dict, args) -> dict:
+    row = prepare_photo_row(cfg, args)
     cols = ', '.join(row.keys())
     qs = ', '.join('?' for _ in row)
     cur = conn.execute(f'INSERT INTO photos ({cols}) VALUES ({qs})', tuple(row.values()))
@@ -256,6 +273,11 @@ def cmd_add(args):
     cfg = load_config(resolve_config_path(args.config))
     ensure_db(cfg)
     with sqlite3.connect(cfg['db_path']) as conn:
+        prepared = prepare_photo_row(cfg, args)
+        existing = find_photo_by_sha(conn, prepared['sha256'])
+        if existing and args.dedup != 'allow-new':
+            print(json.dumps({'dedup': True, 'record': dict(existing)}, ensure_ascii=False, indent=2))
+            return
         row = insert_photo(conn, cfg, args)
     print(json.dumps(row, ensure_ascii=False, indent=2))
 
@@ -370,6 +392,11 @@ def cmd_remember(args):
     if args.auto_ocr and not args.ocr_text:
         args.ocr_text = maybe_run_ocr(Path(args.image).expanduser().resolve(), cfg)
     with sqlite3.connect(cfg['db_path']) as conn:
+        prepared = prepare_photo_row(cfg, args)
+        existing = find_photo_by_sha(conn, prepared['sha256'])
+        if existing and args.dedup == 'return-existing':
+            print(json.dumps({'dedup': True, 'record': dict(existing)}, ensure_ascii=False, indent=2))
+            return
         row = insert_photo(conn, cfg, args)
     if args.auto_embed:
         text = build_embedding_input(
@@ -417,6 +444,25 @@ def cmd_embed(args):
     }, ensure_ascii=False, indent=2))
 
 
+def cmd_inspect(args):
+    cfg = load_config(resolve_config_path(args.config))
+    ensure_db(cfg)
+    src = Path(args.image).expanduser().resolve()
+    if not src.exists():
+        raise SystemExit(f'missing image: {src}')
+    sha = sha256_file(src)
+    with sqlite3.connect(cfg['db_path']) as conn:
+        existing = find_photo_by_sha(conn, sha)
+    out = {
+        'image': str(src),
+        'sha256': sha,
+        'exists': bool(existing),
+    }
+    if existing:
+        out['record'] = dict(existing)
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+
+
 def build_parser():
     p = argparse.ArgumentParser(description='iRemembo MVP')
     p.add_argument(
@@ -443,6 +489,7 @@ def build_parser():
     s.add_argument('--embedding-ref', default='')
     s.add_argument('--dropbox-path', default='')
     s.add_argument('--status', default='draft')
+    s.add_argument('--dedup', choices=['return-existing', 'allow-new'], default='return-existing')
     s.set_defaults(func=cmd_add)
 
     s = sub.add_parser('remember')
@@ -462,6 +509,7 @@ def build_parser():
     s.add_argument('--final-status', default='uploaded')
     s.add_argument('--auto-ocr', action='store_true')
     s.add_argument('--auto-embed', action='store_true')
+    s.add_argument('--dedup', choices=['return-existing', 'allow-new'], default='return-existing')
     s.set_defaults(func=cmd_remember)
 
     s = sub.add_parser('list')
@@ -501,6 +549,10 @@ def build_parser():
     s.add_argument('id', type=int)
     s.add_argument('--model', default='')
     s.set_defaults(func=cmd_embed)
+
+    s = sub.add_parser('inspect')
+    s.add_argument('image')
+    s.set_defaults(func=cmd_inspect)
 
     return p
 

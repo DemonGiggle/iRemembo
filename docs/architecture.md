@@ -17,8 +17,10 @@
 
 ## Current writeback boundary
 - `remember` is the one-shot ingest path: create record, keep retained image, and upload to Dropbox
+- `remember` / `add` now do SHA-256-based duplicate detection by default, so the same source image does not keep creating extra rows unless explicitly allowed
 - `add` creates the initial record and retained image when a split workflow is preferred
 - `annotate` is the explicit writeback point for OCR text, summary, tags, entities, and embedding references
+- `inspect` is the lightweight preflight check for “is this image already remembered?”
 - This keeps later vision/OCR pipelines replaceable without changing DB ownership flow
 
 ## OCR / embedding boundary

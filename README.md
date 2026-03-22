@@ -41,6 +41,7 @@ python3 src/photo_memory.py remember /path/to/image.jpg --summary "示例" --tag
 python3 src/photo_memory.py add /path/to/image.jpg --summary "示例" --tags "標籤1,標籤2"
 python3 src/photo_memory.py annotate 1 --summary "更新後摘要" --tags "標籤1,標籤2,標籤3"
 python3 src/photo_memory.py embed 1
+python3 src/photo_memory.py inspect /path/to/image.jpg
 python3 src/photo_memory.py find 關鍵字
 python3 src/photo_memory.py upload 1
 python3 src/photo_memory.py fetch 1
@@ -49,12 +50,14 @@ python3 src/photo_memory.py fetch 1
 ## Current useful flow
 1. 最簡單：直接用 `remember` 一次完成建檔＋metadata＋上傳 Dropbox
 2. 若要同時跑向量：`remember ... --auto-embed`
-3. 若要拆步驟：`add` 建立本機索引紀錄
-4. `annotate` 寫回 OCR / 摘要 / 標籤 / entities / embedding 參考
-5. `embed` 依據目前 metadata 產生並落地保存 embedding
-6. `upload` 把縮圖送到 Dropbox
-7. `find` 用關鍵字找圖
-8. `fetch` 把已記住的圖從 Dropbox 拉回本機
+3. 預設會用 SHA-256 去重，遇到同圖直接回傳既有紀錄；若真的要重建可加 `--dedup allow-new`
+4. 若要拆步驟：`add` 建立本機索引紀錄
+5. `annotate` 寫回 OCR / 摘要 / 標籤 / entities / embedding 參考
+6. `embed` 依據目前 metadata 產生並落地保存 embedding
+7. `inspect` 可先檢查一張圖是否已經在庫裡
+8. `upload` 把縮圖送到 Dropbox
+9. `find` 用關鍵字找圖
+10. `fetch` 把已記住的圖從 Dropbox 拉回本機
 
 ## OCR / embedding notes
 - OCR 目前是可插拔：
