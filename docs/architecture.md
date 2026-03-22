@@ -16,7 +16,8 @@
 - SQLite DB and thumbnails remain local-only by default
 
 ## Current writeback boundary
-- `add` creates the initial record and retained image
+- `remember` is the one-shot ingest path: create record, keep retained image, and upload to Dropbox
+- `add` creates the initial record and retained image when a split workflow is preferred
 - `annotate` is the explicit writeback point for OCR text, summary, tags, entities, and embedding references
 - This keeps later vision/OCR pipelines replaceable without changing DB ownership flow
 

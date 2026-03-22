@@ -37,6 +37,7 @@ Suggested path: a local-only folder outside the repo, for example `~/iRemembo-lo
 ## Current MVP commands
 ```bash
 python3 src/photo_memory.py init
+python3 src/photo_memory.py remember /path/to/image.jpg --summary "示例" --tags "標籤1,標籤2"
 python3 src/photo_memory.py add /path/to/image.jpg --summary "示例" --tags "標籤1,標籤2"
 python3 src/photo_memory.py annotate 1 --summary "更新後摘要" --tags "標籤1,標籤2,標籤3"
 python3 src/photo_memory.py find 關鍵字
@@ -45,11 +46,12 @@ python3 src/photo_memory.py fetch 1
 ```
 
 ## Current useful flow
-1. `add` 建立本機索引紀錄
-2. `annotate` 寫回 OCR / 摘要 / 標籤 / entities / embedding 參考
-3. `upload` 把縮圖送到 Dropbox
-4. `find` 用關鍵字找圖
-5. `fetch` 把已記住的圖從 Dropbox 拉回本機
+1. 最簡單：直接用 `remember` 一次完成建檔＋metadata＋上傳 Dropbox
+2. 若要拆步驟：`add` 建立本機索引紀錄
+3. `annotate` 寫回 OCR / 摘要 / 標籤 / entities / embedding 參考
+4. `upload` 把縮圖送到 Dropbox
+5. `find` 用關鍵字找圖
+6. `fetch` 把已記住的圖從 Dropbox 拉回本機
 
 ## Local-only config example
 ```json

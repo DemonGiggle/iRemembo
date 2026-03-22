@@ -87,27 +87,25 @@ def make_thumb(src: Path, thumb_dir: Path, sha: str) -> Path:
     return out
 
 
-def cmd_init(args):
-    cfg = load_config(resolve_config_path(args.config))
-    ensure_db(cfg)
-    print(cfg['db_path'])
+def parse_tags(raw: str) -> list[str]:
+    return [t.strip() for t in (raw or '').split(',') if t.strip()]
 
 
-def cmd_add(args):
-    cfg = load_config(resolve_config_path(args.config))
-    ensure_db(cfg)
-    src = Path(args.image).expanduser().resolve()
-    if not src.exists():
-        raise SystemExit(f'missing image: {src}')
-    sha = sha256_file(src)
-    thumb = make_thumb(src, Path(cfg['thumb_dir']), sha)
-    tags = [t.strip() for t in (args.tags or '').split(',') if t.strip()]
-    entities = {
+def build_entities(args) -> dict:
+    return {
         'dates': args.dates or [],
         'people': args.people or [],
         'places': args.places or [],
         'objects': args.objects or [],
     }
+
+
+def insert_photo(conn, cfg: dict, args) -> dict:
+    src = Path(args.image).expanduser().resolve()
+    if not src.exists():
+        raise SystemExit(f'missing image: {src}')
+    sha = sha256_file(src)
+    thumb = make_thumb(src, Path(cfg['thumb_dir']), sha)
     row = {
         'source_path': str(src),
         'thumb_path': str(thumb),
@@ -118,18 +116,40 @@ def cmd_add(args):
         'user_note': args.note,
         'summary': args.summary,
         'ocr_text': args.ocr_text,
-        'tags_json': json.dumps(tags, ensure_ascii=False),
-        'entities_json': json.dumps(entities, ensure_ascii=False),
+        'tags_json': json.dumps(parse_tags(args.tags), ensure_ascii=False),
+        'entities_json': json.dumps(build_entities(args), ensure_ascii=False),
         'embedding_model': args.embedding_model,
         'embedding_ref': args.embedding_ref,
         'status': args.status,
     }
+    cols = ', '.join(row.keys())
+    qs = ', '.join('?' for _ in row)
+    cur = conn.execute(f'INSERT INTO photos ({cols}) VALUES ({qs})', tuple(row.values()))
+    conn.commit()
+    return {'id': cur.lastrowid, **row}
+
+
+def upload_photo(cfg: dict, photo_id: int, thumb_path: str, dropbox_path: str, status: str = 'uploaded'):
+    subprocess.run([
+        sys.executable, cfg['dropbox_tool'], 'upload', thumb_path, dropbox_path, '--overwrite'
+    ], check=True)
     with sqlite3.connect(cfg['db_path']) as conn:
-        cols = ', '.join(row.keys())
-        qs = ', '.join('?' for _ in row)
-        cur = conn.execute(f'INSERT INTO photos ({cols}) VALUES ({qs})', tuple(row.values()))
+        conn.execute('UPDATE photos SET status = ?, noted_at = ? WHERE id = ?', (status, utc_now(), photo_id))
         conn.commit()
-        print(json.dumps({'id': cur.lastrowid, **row}, ensure_ascii=False, indent=2))
+
+
+def cmd_init(args):
+    cfg = load_config(resolve_config_path(args.config))
+    ensure_db(cfg)
+    print(cfg['db_path'])
+
+
+def cmd_add(args):
+    cfg = load_config(resolve_config_path(args.config))
+    ensure_db(cfg)
+    with sqlite3.connect(cfg['db_path']) as conn:
+        row = insert_photo(conn, cfg, args)
+    print(json.dumps(row, ensure_ascii=False, indent=2))
 
 
 def cmd_list(args):
@@ -168,11 +188,7 @@ def cmd_upload(args):
         row = conn.execute('SELECT id, thumb_path, dropbox_path FROM photos WHERE id = ?', (args.id,)).fetchone()
         if not row:
             raise SystemExit(f'no photo id={args.id}')
-        subprocess.run([
-            sys.executable, cfg['dropbox_tool'], 'upload', row['thumb_path'], row['dropbox_path'], '--overwrite'
-        ], check=True)
-        conn.execute('UPDATE photos SET status = ? WHERE id = ?', ('uploaded', args.id))
-        conn.commit()
+    upload_photo(cfg, args.id, row['thumb_path'], row['dropbox_path'])
     print(json.dumps({'id': args.id, 'dropbox_path': row['dropbox_path'], 'status': 'uploaded'}, ensure_ascii=False, indent=2))
 
 
@@ -206,19 +222,12 @@ def cmd_fetch(args):
 def cmd_annotate(args):
     cfg = load_config(resolve_config_path(args.config))
     ensure_db(cfg)
-    tags = [t.strip() for t in (args.tags or '').split(',') if t.strip()]
-    entities = {
-        'dates': args.dates or [],
-        'people': args.people or [],
-        'places': args.places or [],
-        'objects': args.objects or [],
-    }
     patch = {
         'noted_at': utc_now(),
         'summary': args.summary,
         'ocr_text': args.ocr_text,
-        'tags_json': json.dumps(tags, ensure_ascii=False),
-        'entities_json': json.dumps(entities, ensure_ascii=False),
+        'tags_json': json.dumps(parse_tags(args.tags), ensure_ascii=False),
+        'entities_json': json.dumps(build_entities(args), ensure_ascii=False),
         'embedding_model': args.embedding_model,
         'embedding_ref': args.embedding_ref,
         'status': args.status,
@@ -237,6 +246,24 @@ def cmd_annotate(args):
             (args.id,),
         ).fetchone()
     print(json.dumps(dict(row), ensure_ascii=False, indent=2))
+
+
+def cmd_remember(args):
+    cfg = load_config(resolve_config_path(args.config))
+    ensure_db(cfg)
+    with sqlite3.connect(cfg['db_path']) as conn:
+        row = insert_photo(conn, cfg, args)
+    upload_photo(cfg, row['id'], row['thumb_path'], row['dropbox_path'], status=args.final_status)
+    result = {
+        'id': row['id'],
+        'summary': row['summary'],
+        'dropbox_path': row['dropbox_path'],
+        'thumb_path': row['thumb_path'],
+        'embedding_model': row['embedding_model'],
+        'embedding_ref': row['embedding_ref'],
+        'status': args.final_status,
+    }
+    print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 def build_parser():
@@ -266,6 +293,23 @@ def build_parser():
     s.add_argument('--dropbox-path', default='')
     s.add_argument('--status', default='draft')
     s.set_defaults(func=cmd_add)
+
+    s = sub.add_parser('remember')
+    s.add_argument('image')
+    s.add_argument('--note', default='')
+    s.add_argument('--summary', default='')
+    s.add_argument('--ocr-text', default='')
+    s.add_argument('--tags', default='')
+    s.add_argument('--dates', nargs='*', default=[])
+    s.add_argument('--people', nargs='*', default=[])
+    s.add_argument('--places', nargs='*', default=[])
+    s.add_argument('--objects', nargs='*', default=[])
+    s.add_argument('--embedding-model', default='')
+    s.add_argument('--embedding-ref', default='')
+    s.add_argument('--dropbox-path', default='')
+    s.add_argument('--status', default='annotated')
+    s.add_argument('--final-status', default='uploaded')
+    s.set_defaults(func=cmd_remember)
 
     s = sub.add_parser('list')
     s.add_argument('--limit', type=int, default=20)
