@@ -23,13 +23,26 @@
 - `inspect` is the lightweight preflight check for “is this image already remembered?”
 - This keeps later vision/OCR pipelines replaceable without changing DB ownership flow
 
-## OCR / embedding boundary
+## OCR / analysis / embedding boundary
 - OCR is pluggable: local config may define `ocr_command`, otherwise the app tries local `tesseract` if available
+- Analysis is also pluggable: local config may define `analysis_command`
+- If no `analysis_command` is configured, the app can try OpenAI vision via `/v1/chat/completions`
+- Analysis output is normalized into fixed fields:
+  - `summary`
+  - `tags`
+  - `entities.dates`
+  - `entities.times`
+  - `entities.people`
+  - `entities.places`
+  - `entities.organizations`
+  - `entities.objects`
+  - `ocr_text`
 - Embeddings are generated from summary + note + OCR + tags + entities text
 - Embedding vectors are stored locally in SQLite so repo stays clean
 
 ## Future work
-- Automatic OCR/summary/tag extraction hook
-- Embedding generation + local/vector lookup
+- Better OCR engine installation / benchmarking
+- Improve duplicate policy beyond exact SHA match
+- Embedding-based retrieval ranking
 - Tooling to fetch remembered images from Dropbox back to local/send-back flows
 - Alternate storage backends

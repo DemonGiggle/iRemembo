@@ -37,6 +37,7 @@ Suggested path: a local-only folder outside the repo, for example `~/iRemembo-lo
 ## Current MVP commands
 ```bash
 python3 src/photo_memory.py init
+python3 src/photo_memory.py remember /path/to/image.jpg --auto-analyze --auto-embed
 python3 src/photo_memory.py remember /path/to/image.jpg --summary "示例" --tags "標籤1,標籤2" --auto-embed
 python3 src/photo_memory.py add /path/to/image.jpg --summary "示例" --tags "標籤1,標籤2"
 python3 src/photo_memory.py annotate 1 --summary "更新後摘要" --tags "標籤1,標籤2,標籤3"
@@ -48,21 +49,28 @@ python3 src/photo_memory.py fetch 1
 ```
 
 ## Current useful flow
-1. 最簡單：直接用 `remember` 一次完成建檔＋metadata＋上傳 Dropbox
-2. 若要同時跑向量：`remember ... --auto-embed`
-3. 預設會用 SHA-256 去重，遇到同圖直接回傳既有紀錄；若真的要重建可加 `--dedup allow-new`
-4. 若要拆步驟：`add` 建立本機索引紀錄
-5. `annotate` 寫回 OCR / 摘要 / 標籤 / entities / embedding 參考
-6. `embed` 依據目前 metadata 產生並落地保存 embedding
-7. `inspect` 可先檢查一張圖是否已經在庫裡
-8. `upload` 把縮圖送到 Dropbox
-9. `find` 用關鍵字找圖
-10. `fetch` 把已記住的圖從 Dropbox 拉回本機
+1. 最簡單：直接用 `remember --auto-analyze --auto-embed` 一次完成建檔＋分析＋上傳 Dropbox
+2. `--auto-analyze` 會嘗試自動產生 `summary` / `tags` / `entities` / `ocr_text`
+3. 分析來源優先順序：`analysis_command` → OpenAI vision (`/v1/chat/completions`) → fallback 空結果
+4. 若要同時跑向量：`remember ... --auto-embed`
+5. 預設會用 SHA-256 去重，遇到同圖直接回傳既有紀錄；若真的要重建可加 `--dedup allow-new`
+6. 若要拆步驟：`add` 建立本機索引紀錄
+7. `annotate` 寫回 OCR / 摘要 / 標籤 / entities / embedding 參考
+8. `embed` 依據目前 metadata 產生並落地保存 embedding
+9. `inspect` 可先檢查一張圖是否已經在庫裡
+10. `upload` 把縮圖送到 Dropbox
+11. `find` 用關鍵字找圖
+12. `fetch` 把已記住的圖從 Dropbox 拉回本機
 
-## OCR / embedding notes
+## OCR / analysis / embedding notes
 - OCR 目前是可插拔：
   - 若系統有 `tesseract`，可用 `--auto-ocr`
   - 或在 local config 設 `ocr_command`
+- 自動分析目前也是可插拔：
+  - 可在 local config 設 `analysis_command`，回傳固定 JSON
+  - 否則會嘗試用 OpenAI vision 經 `/v1/chat/completions` 產生 `summary/tags/entities/ocr_text`
+- `entities` 目前固定 schema：
+  - `dates`, `times`, `people`, `places`, `organizations`, `objects`
 - Embedding 目前會直接呼叫 OpenAI `/v1/embeddings`
 - 向量目前存本機 SQLite `photo_embeddings` 表
 
@@ -72,6 +80,10 @@ python3 src/photo_memory.py fetch 1
   "db_path": "/absolute/path/to/iRemembo-local/photo-memory.db",
   "thumb_dir": "/absolute/path/to/iRemembo-local/thumbs",
   "dropbox_base": "/photo-memory",
-  "dropbox_tool": "/absolute/path/to/iRemembo/scripts/dropbox_tool.py"
+  "dropbox_tool": "/absolute/path/to/iRemembo/scripts/dropbox_tool.py",
+  "embedding_model": "text-embedding-3-small",
+  "vision_model": "gpt-4.1-mini",
+  "ocr_command": [],
+  "analysis_command": []
 }
 ```

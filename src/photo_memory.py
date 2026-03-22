@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -105,8 +106,10 @@ def parse_tags(raw: str) -> list[str]:
 def build_entities(args) -> dict:
     return {
         'dates': args.dates or [],
+        'times': getattr(args, 'times', []) or [],
         'people': args.people or [],
         'places': args.places or [],
+        'organizations': getattr(args, 'organizations', []) or [],
         'objects': args.objects or [],
     }
 
@@ -133,6 +136,105 @@ def maybe_run_ocr(image_path: Path, cfg: dict) -> str:
         return result.stdout.strip()
     except Exception:
         return ''
+
+
+def normalize_analysis(raw: dict) -> dict:
+    entities = raw.get('entities') or {}
+    return {
+        'summary': (raw.get('summary') or '').strip(),
+        'tags': [str(t).strip() for t in (raw.get('tags') or []) if str(t).strip()],
+        'entities': {
+            'dates': [str(x).strip() for x in (entities.get('dates') or []) if str(x).strip()],
+            'times': [str(x).strip() for x in (entities.get('times') or []) if str(x).strip()],
+            'people': [str(x).strip() for x in (entities.get('people') or []) if str(x).strip()],
+            'places': [str(x).strip() for x in (entities.get('places') or []) if str(x).strip()],
+            'organizations': [str(x).strip() for x in (entities.get('organizations') or []) if str(x).strip()],
+            'objects': [str(x).strip() for x in (entities.get('objects') or []) if str(x).strip()],
+        },
+        'ocr_text': (raw.get('ocr_text') or '').strip(),
+    }
+
+
+def run_analysis_command(image_path: Path, cfg: dict, ocr_text: str, user_note: str) -> dict:
+    command = cfg.get('analysis_command', '')
+    if not command:
+        return {}
+    cmd = [
+        part.replace('{image}', str(image_path)).replace('{ocr_text}', ocr_text).replace('{note}', user_note or '')
+        for part in command
+    ]
+    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    return normalize_analysis(json.loads(result.stdout))
+
+
+def openai_analyze_image(image_path: Path, cfg: dict, ocr_text: str, user_note: str) -> dict:
+    api_key = os.environ.get('OPENAI_API_KEY', '')
+    if not api_key:
+        return {}
+    model = cfg.get('vision_model', 'gpt-4.1-mini')
+    mime = 'image/jpeg'
+    suffix = image_path.suffix.lower()
+    if suffix == '.png':
+        mime = 'image/png'
+    elif suffix == '.webp':
+        mime = 'image/webp'
+    b64 = base64.b64encode(image_path.read_bytes()).decode()
+    prompt = (
+        'Analyze this image for a personal photo-memory system. '
+        'Return strict JSON only with keys: summary, tags, entities, ocr_text. '
+        'summary should be concise Traditional Chinese. '
+        'tags should be 3 to 8 short noun-like tags. '
+        'entities must be an object with arrays for dates, times, people, places, organizations, objects. '
+        'If unsure, use empty strings or empty arrays. Do not invent facts. '
+        f'Existing OCR text: {ocr_text or ""}. '
+        f'User note: {user_note or ""}.'
+    )
+    payload = {
+        'model': model,
+        'response_format': {'type': 'json_object'},
+        'messages': [
+            {
+                'role': 'user',
+                'content': [
+                    {'type': 'text', 'text': prompt},
+                    {'type': 'image_url', 'image_url': {'url': f'data:{mime};base64,{b64}'}},
+                ],
+            }
+        ],
+        'temperature': 0.2,
+    }
+    req = urllib.request.Request(
+        'https://api.openai.com/v1/chat/completions',
+        data=json.dumps(payload).encode(),
+        headers={
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json',
+        },
+        method='POST',
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            resp = json.load(r)
+    except Exception:
+        return {}
+    try:
+        content = resp['choices'][0]['message']['content']
+        return normalize_analysis(json.loads(content))
+    except Exception:
+        return {}
+
+
+def analyze_image(image_path: Path, cfg: dict, user_note: str = '', ocr_text: str = '') -> dict:
+    try:
+        via_cmd = run_analysis_command(image_path, cfg, ocr_text, user_note)
+        if via_cmd:
+            return via_cmd
+    except Exception:
+        pass
+    via_openai = openai_analyze_image(image_path, cfg, ocr_text, user_note)
+    if via_openai:
+        return via_openai
+    return {'summary': '', 'tags': [], 'entities': {}, 'ocr_text': ocr_text or ''}
 
 
 def build_embedding_input(summary: str, ocr_text: str, tags_json: str, entities_json: str, user_note: str) -> str:
@@ -389,8 +491,30 @@ def cmd_annotate(args):
 def cmd_remember(args):
     cfg = load_config(resolve_config_path(args.config))
     ensure_db(cfg)
+    image_path = Path(args.image).expanduser().resolve()
     if args.auto_ocr and not args.ocr_text:
-        args.ocr_text = maybe_run_ocr(Path(args.image).expanduser().resolve(), cfg)
+        args.ocr_text = maybe_run_ocr(image_path, cfg)
+    if args.auto_analyze:
+        analyzed = analyze_image(image_path, cfg, user_note=args.note, ocr_text=args.ocr_text)
+        if not args.summary:
+            args.summary = analyzed.get('summary', '')
+        if not args.tags:
+            args.tags = ','.join(analyzed.get('tags', []))
+        if not args.ocr_text:
+            args.ocr_text = analyzed.get('ocr_text', '')
+        entities = analyzed.get('entities', {})
+        if not args.dates:
+            args.dates = entities.get('dates', []) or []
+        if not args.times:
+            args.times = entities.get('times', []) or []
+        if not args.people:
+            args.people = entities.get('people', []) or []
+        if not args.places:
+            args.places = entities.get('places', []) or []
+        if not args.organizations:
+            args.organizations = entities.get('organizations', []) or []
+        if not args.objects:
+            args.objects = entities.get('objects', []) or []
     with sqlite3.connect(cfg['db_path']) as conn:
         prepared = prepare_photo_row(cfg, args)
         existing = find_photo_by_sha(conn, prepared['sha256'])
@@ -482,8 +606,10 @@ def build_parser():
     s.add_argument('--ocr-text', default='')
     s.add_argument('--tags', default='')
     s.add_argument('--dates', nargs='*', default=[])
+    s.add_argument('--times', nargs='*', default=[])
     s.add_argument('--people', nargs='*', default=[])
     s.add_argument('--places', nargs='*', default=[])
+    s.add_argument('--organizations', nargs='*', default=[])
     s.add_argument('--objects', nargs='*', default=[])
     s.add_argument('--embedding-model', default='')
     s.add_argument('--embedding-ref', default='')
@@ -499,8 +625,10 @@ def build_parser():
     s.add_argument('--ocr-text', default='')
     s.add_argument('--tags', default='')
     s.add_argument('--dates', nargs='*', default=[])
+    s.add_argument('--times', nargs='*', default=[])
     s.add_argument('--people', nargs='*', default=[])
     s.add_argument('--places', nargs='*', default=[])
+    s.add_argument('--organizations', nargs='*', default=[])
     s.add_argument('--objects', nargs='*', default=[])
     s.add_argument('--embedding-model', default='')
     s.add_argument('--embedding-ref', default='')
@@ -508,6 +636,7 @@ def build_parser():
     s.add_argument('--status', default='annotated')
     s.add_argument('--final-status', default='uploaded')
     s.add_argument('--auto-ocr', action='store_true')
+    s.add_argument('--auto-analyze', action='store_true')
     s.add_argument('--auto-embed', action='store_true')
     s.add_argument('--dedup', choices=['return-existing', 'allow-new'], default='return-existing')
     s.set_defaults(func=cmd_remember)
@@ -536,8 +665,10 @@ def build_parser():
     s.add_argument('--ocr-text', default='')
     s.add_argument('--tags', default='')
     s.add_argument('--dates', nargs='*', default=[])
+    s.add_argument('--times', nargs='*', default=[])
     s.add_argument('--people', nargs='*', default=[])
     s.add_argument('--places', nargs='*', default=[])
+    s.add_argument('--organizations', nargs='*', default=[])
     s.add_argument('--objects', nargs='*', default=[])
     s.add_argument('--embedding-model', default='')
     s.add_argument('--embedding-ref', default='')
