@@ -7,6 +7,8 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,6 +32,15 @@ CREATE TABLE IF NOT EXISTS photos (
 );
 CREATE INDEX IF NOT EXISTS idx_photos_sha256 ON photos(sha256);
 CREATE INDEX IF NOT EXISTS idx_photos_status ON photos(status);
+
+CREATE TABLE IF NOT EXISTS photo_embeddings (
+  photo_id INTEGER PRIMARY KEY,
+  model TEXT NOT NULL,
+  input_text TEXT NOT NULL,
+  vector_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(photo_id) REFERENCES photos(id)
+);
 '''
 
 
@@ -98,6 +109,103 @@ def build_entities(args) -> dict:
         'places': args.places or [],
         'objects': args.objects or [],
     }
+
+
+def maybe_run_ocr(image_path: Path, cfg: dict) -> str:
+    command = cfg.get('ocr_command', '')
+    if command:
+        cmd = [part.replace('{image}', str(image_path)) for part in command]
+        try:
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            return result.stdout.strip()
+        except Exception:
+            return ''
+    tesseract = shutil.which('tesseract')
+    if not tesseract:
+        return ''
+    try:
+        result = subprocess.run(
+            [tesseract, str(image_path), 'stdout', '-l', 'chi_tra+eng'],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip()
+    except Exception:
+        return ''
+
+
+def build_embedding_input(summary: str, ocr_text: str, tags_json: str, entities_json: str, user_note: str) -> str:
+    parts = []
+    if summary:
+        parts.append(f'summary: {summary}')
+    if user_note:
+        parts.append(f'note: {user_note}')
+    if ocr_text:
+        parts.append(f'ocr: {ocr_text}')
+    try:
+        tags = json.loads(tags_json or '[]')
+    except Exception:
+        tags = []
+    if tags:
+        parts.append('tags: ' + ', '.join(tags))
+    try:
+        entities = json.loads(entities_json or '{}')
+    except Exception:
+        entities = {}
+    flat_entities = []
+    for key, values in entities.items():
+        if values:
+            flat_entities.append(f"{key}: {', '.join(values)}")
+    if flat_entities:
+        parts.append('entities: ' + ' | '.join(flat_entities))
+    return '\n'.join(parts).strip()
+
+
+def create_embedding(text: str, model: str) -> tuple[str, list[float]]:
+    api_key = os.environ.get('OPENAI_API_KEY', '')
+    if not api_key:
+        raise SystemExit('OPENAI_API_KEY is required for embeddings')
+    payload = json.dumps({'model': model, 'input': text}).encode()
+    req = urllib.request.Request(
+        'https://api.openai.com/v1/embeddings',
+        data=payload,
+        headers={
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json',
+        },
+        method='POST',
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            resp = json.load(r)
+    except urllib.error.HTTPError as e:
+        msg = e.read().decode()
+        raise SystemExit(f'embedding request failed: {e.code} {msg}')
+    vector = resp['data'][0]['embedding']
+    return model, vector
+
+
+def store_embedding(cfg: dict, photo_id: int, model: str, input_text: str, vector: list[float]):
+    ensure_db(cfg)
+    with sqlite3.connect(cfg['db_path']) as conn:
+        conn.execute(
+            '''
+            INSERT INTO photo_embeddings (photo_id, model, input_text, vector_json, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(photo_id) DO UPDATE SET
+              model = excluded.model,
+              input_text = excluded.input_text,
+              vector_json = excluded.vector_json,
+              created_at = excluded.created_at
+            ''',
+            (photo_id, model, input_text, json.dumps(vector), utc_now()),
+        )
+        conn.execute(
+            'UPDATE photos SET embedding_model = ?, embedding_ref = ?, noted_at = ? WHERE id = ?',
+            (model, f'sqlite:photo_embeddings:{photo_id}', utc_now(), photo_id),
+        )
+        conn.commit()
 
 
 def insert_photo(conn, cfg: dict, args) -> dict:
@@ -222,10 +330,18 @@ def cmd_fetch(args):
 def cmd_annotate(args):
     cfg = load_config(resolve_config_path(args.config))
     ensure_db(cfg)
+    ocr_text = args.ocr_text
+    if args.auto_ocr:
+        with sqlite3.connect(cfg['db_path']) as conn:
+            conn.row_factory = sqlite3.Row
+            src = conn.execute('SELECT source_path FROM photos WHERE id = ?', (args.id,)).fetchone()
+            if not src:
+                raise SystemExit(f'no photo id={args.id}')
+        ocr_text = maybe_run_ocr(Path(src['source_path']), cfg)
     patch = {
         'noted_at': utc_now(),
         'summary': args.summary,
-        'ocr_text': args.ocr_text,
+        'ocr_text': ocr_text,
         'tags_json': json.dumps(parse_tags(args.tags), ensure_ascii=False),
         'entities_json': json.dumps(build_entities(args), ensure_ascii=False),
         'embedding_model': args.embedding_model,
@@ -251,8 +367,19 @@ def cmd_annotate(args):
 def cmd_remember(args):
     cfg = load_config(resolve_config_path(args.config))
     ensure_db(cfg)
+    if args.auto_ocr and not args.ocr_text:
+        args.ocr_text = maybe_run_ocr(Path(args.image).expanduser().resolve(), cfg)
     with sqlite3.connect(cfg['db_path']) as conn:
         row = insert_photo(conn, cfg, args)
+    if args.auto_embed:
+        text = build_embedding_input(
+            row['summary'], row['ocr_text'], row['tags_json'], row['entities_json'], row['user_note']
+        )
+        if text:
+            model, vector = create_embedding(text, args.embedding_model or cfg.get('embedding_model', 'text-embedding-3-small'))
+            store_embedding(cfg, row['id'], model, text, vector)
+            row['embedding_model'] = model
+            row['embedding_ref'] = f'sqlite:photo_embeddings:{row["id"]}'
     upload_photo(cfg, row['id'], row['thumb_path'], row['dropbox_path'], status=args.final_status)
     result = {
         'id': row['id'],
@@ -264,6 +391,30 @@ def cmd_remember(args):
         'status': args.final_status,
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def cmd_embed(args):
+    cfg = load_config(resolve_config_path(args.config))
+    ensure_db(cfg)
+    with sqlite3.connect(cfg['db_path']) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            'SELECT id, summary, ocr_text, tags_json, entities_json, user_note FROM photos WHERE id = ?',
+            (args.id,),
+        ).fetchone()
+        if not row:
+            raise SystemExit(f'no photo id={args.id}')
+    text = build_embedding_input(row['summary'], row['ocr_text'], row['tags_json'], row['entities_json'], row['user_note'])
+    if not text:
+        raise SystemExit('nothing to embed: photo record has no summary/ocr/tags/entities/note')
+    model, vector = create_embedding(text, args.model or cfg.get('embedding_model', 'text-embedding-3-small'))
+    store_embedding(cfg, args.id, model, text, vector)
+    print(json.dumps({
+        'id': args.id,
+        'model': model,
+        'embedding_ref': f'sqlite:photo_embeddings:{args.id}',
+        'dimensions': len(vector),
+    }, ensure_ascii=False, indent=2))
 
 
 def build_parser():
@@ -309,6 +460,8 @@ def build_parser():
     s.add_argument('--dropbox-path', default='')
     s.add_argument('--status', default='annotated')
     s.add_argument('--final-status', default='uploaded')
+    s.add_argument('--auto-ocr', action='store_true')
+    s.add_argument('--auto-embed', action='store_true')
     s.set_defaults(func=cmd_remember)
 
     s = sub.add_parser('list')
@@ -341,7 +494,13 @@ def build_parser():
     s.add_argument('--embedding-model', default='')
     s.add_argument('--embedding-ref', default='')
     s.add_argument('--status', default='annotated')
+    s.add_argument('--auto-ocr', action='store_true')
     s.set_defaults(func=cmd_annotate)
+
+    s = sub.add_parser('embed')
+    s.add_argument('id', type=int)
+    s.add_argument('--model', default='')
+    s.set_defaults(func=cmd_embed)
 
     return p
 

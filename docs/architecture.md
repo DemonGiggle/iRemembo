@@ -21,6 +21,11 @@
 - `annotate` is the explicit writeback point for OCR text, summary, tags, entities, and embedding references
 - This keeps later vision/OCR pipelines replaceable without changing DB ownership flow
 
+## OCR / embedding boundary
+- OCR is pluggable: local config may define `ocr_command`, otherwise the app tries local `tesseract` if available
+- Embeddings are generated from summary + note + OCR + tags + entities text
+- Embedding vectors are stored locally in SQLite so repo stays clean
+
 ## Future work
 - Automatic OCR/summary/tag extraction hook
 - Embedding generation + local/vector lookup
