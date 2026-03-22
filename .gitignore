@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Local-only runtime/config data
+.env
+config/local.json
+*.sqlite
+*.db
+*.db-*
+data/
+thumbs/
+state/
+
+# Editor/OS
+.DS_Store

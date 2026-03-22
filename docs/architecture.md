@@ -1,0 +1,22 @@
+# Architecture
+
+## Pipeline
+1. User explicitly says an image should be remembered
+2. Analyze original image
+3. Produce OCR text / summary / tags / entities
+4. Create a smaller retained image
+5. Store metadata in local SQLite
+6. Upload retained image to Dropbox
+7. Later, query local metadata first, then fetch image from Dropbox if needed
+
+## Privacy boundary
+- Repo contains no secrets or private user data
+- Real config stays outside repo
+- Tokens remain in local secret storage only
+- SQLite DB and thumbnails remain local-only by default
+
+## Future work
+- Automatic OCR/summary/tag extraction hook
+- Embedding generation + local/vector lookup
+- Tooling to fetch remembered images from Dropbox back to local/send-back flows
+- Alternate storage backends

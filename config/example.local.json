@@ -1,0 +1,6 @@
+{
+  "db_path": "/ABSOLUTE/PATH/TO/iRemembo-local/photo-memory.db",
+  "thumb_dir": "/ABSOLUTE/PATH/TO/iRemembo-local/thumbs",
+  "dropbox_base": "/photo-memory",
+  "dropbox_tool": "/ABSOLUTE/PATH/TO/iRemembo/scripts/dropbox_tool.py"
+}

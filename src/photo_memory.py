@@ -1,0 +1,257 @@
+#!/usr/bin/env python3
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import sqlite3
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+SCHEMA = '''
+CREATE TABLE IF NOT EXISTS photos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_path TEXT NOT NULL,
+  thumb_path TEXT,
+  dropbox_path TEXT,
+  sha256 TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  noted_at TEXT NOT NULL,
+  user_note TEXT,
+  summary TEXT,
+  ocr_text TEXT,
+  tags_json TEXT,
+  entities_json TEXT,
+  embedding_model TEXT,
+  embedding_ref TEXT,
+  status TEXT NOT NULL DEFAULT 'draft'
+);
+CREATE INDEX IF NOT EXISTS idx_photos_sha256 ON photos(sha256);
+CREATE INDEX IF NOT EXISTS idx_photos_status ON photos(status);
+'''
+
+
+def resolve_config_path(raw: str) -> Path:
+    chosen = raw or os.environ.get('IREMEMBO_CONFIG', '')
+    if not chosen:
+        raise SystemExit('config path required: pass --config or set IREMEMBO_CONFIG')
+    return Path(chosen).expanduser().resolve()
+
+
+def load_config(path: Path) -> dict:
+    with path.open() as f:
+        cfg = json.load(f)
+    required = ['db_path', 'thumb_dir', 'dropbox_base', 'dropbox_tool']
+    missing = [k for k in required if not cfg.get(k)]
+    if missing:
+        raise SystemExit(f'missing config keys: {", ".join(missing)}')
+    return cfg
+
+
+def ensure_db(cfg: dict):
+    db_path = Path(cfg['db_path'])
+    thumb_dir = Path(cfg['thumb_dir'])
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    thumb_dir.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(SCHEMA)
+        conn.commit()
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open('rb') as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def make_thumb(src: Path, thumb_dir: Path, sha: str) -> Path:
+    ext = src.suffix.lower() or '.jpg'
+    if ext not in {'.jpg', '.jpeg', '.png', '.webp'}:
+        ext = '.jpg'
+    out = thumb_dir / f'{sha[:16]}{ext}'
+    if out.exists():
+        return out
+    cmd = ['ffmpeg', '-y', '-i', str(src), '-vf', 'scale=1280:-2', '-q:v', '4', str(out)]
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        shutil.copy2(src, out)
+    return out
+
+
+def cmd_init(args):
+    cfg = load_config(resolve_config_path(args.config))
+    ensure_db(cfg)
+    print(cfg['db_path'])
+
+
+def cmd_add(args):
+    cfg = load_config(resolve_config_path(args.config))
+    ensure_db(cfg)
+    src = Path(args.image).expanduser().resolve()
+    if not src.exists():
+        raise SystemExit(f'missing image: {src}')
+    sha = sha256_file(src)
+    thumb = make_thumb(src, Path(cfg['thumb_dir']), sha)
+    tags = [t.strip() for t in (args.tags or '').split(',') if t.strip()]
+    entities = {
+        'dates': args.dates or [],
+        'people': args.people or [],
+        'places': args.places or [],
+        'objects': args.objects or [],
+    }
+    row = {
+        'source_path': str(src),
+        'thumb_path': str(thumb),
+        'dropbox_path': args.dropbox_path or f"{cfg['dropbox_base']}/{thumb.name}",
+        'sha256': sha,
+        'created_at': datetime.fromtimestamp(src.stat().st_mtime, timezone.utc).isoformat(),
+        'noted_at': utc_now(),
+        'user_note': args.note,
+        'summary': args.summary,
+        'ocr_text': args.ocr_text,
+        'tags_json': json.dumps(tags, ensure_ascii=False),
+        'entities_json': json.dumps(entities, ensure_ascii=False),
+        'embedding_model': args.embedding_model,
+        'embedding_ref': args.embedding_ref,
+        'status': args.status,
+    }
+    with sqlite3.connect(cfg['db_path']) as conn:
+        cols = ', '.join(row.keys())
+        qs = ', '.join('?' for _ in row)
+        cur = conn.execute(f'INSERT INTO photos ({cols}) VALUES ({qs})', tuple(row.values()))
+        conn.commit()
+        print(json.dumps({'id': cur.lastrowid, **row}, ensure_ascii=False, indent=2))
+
+
+def cmd_list(args):
+    cfg = load_config(resolve_config_path(args.config))
+    ensure_db(cfg)
+    with sqlite3.connect(cfg['db_path']) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            'SELECT id, noted_at, summary, dropbox_path, status FROM photos ORDER BY id DESC LIMIT ?',
+            (args.limit,),
+        ).fetchall()
+    print(json.dumps([dict(r) for r in rows], ensure_ascii=False, indent=2))
+
+
+def cmd_find(args):
+    cfg = load_config(resolve_config_path(args.config))
+    ensure_db(cfg)
+    q = f'%{args.query}%'
+    sql = '''
+    SELECT id, noted_at, summary, user_note, dropbox_path, tags_json, status
+    FROM photos
+    WHERE summary LIKE ? OR user_note LIKE ? OR ocr_text LIKE ? OR tags_json LIKE ? OR entities_json LIKE ?
+    ORDER BY id DESC LIMIT ?
+    '''
+    with sqlite3.connect(cfg['db_path']) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(sql, (q, q, q, q, q, args.limit)).fetchall()
+    print(json.dumps([dict(r) for r in rows], ensure_ascii=False, indent=2))
+
+
+def cmd_upload(args):
+    cfg = load_config(resolve_config_path(args.config))
+    ensure_db(cfg)
+    with sqlite3.connect(cfg['db_path']) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute('SELECT id, thumb_path, dropbox_path FROM photos WHERE id = ?', (args.id,)).fetchone()
+        if not row:
+            raise SystemExit(f'no photo id={args.id}')
+        subprocess.run([
+            sys.executable, cfg['dropbox_tool'], 'upload', row['thumb_path'], row['dropbox_path'], '--overwrite'
+        ], check=True)
+        conn.execute('UPDATE photos SET status = ? WHERE id = ?', ('uploaded', args.id))
+        conn.commit()
+    print(json.dumps({'id': args.id, 'dropbox_path': row['dropbox_path'], 'status': 'uploaded'}, ensure_ascii=False, indent=2))
+
+
+def cmd_fetch(args):
+    cfg = load_config(resolve_config_path(args.config))
+    ensure_db(cfg)
+    with sqlite3.connect(cfg['db_path']) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            'SELECT id, sha256, thumb_path, dropbox_path, summary, status FROM photos WHERE id = ?',
+            (args.id,),
+        ).fetchone()
+        if not row:
+            raise SystemExit(f'no photo id={args.id}')
+
+    default_out = Path(cfg['thumb_dir']) / 'fetched' / Path(row['dropbox_path']).name
+    out_path = Path(args.out).expanduser().resolve() if args.out else default_out
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run([
+        sys.executable, cfg['dropbox_tool'], 'download', row['dropbox_path'], str(out_path)
+    ], check=True)
+    print(json.dumps({
+        'id': args.id,
+        'summary': row['summary'],
+        'dropbox_path': row['dropbox_path'],
+        'local_path': str(out_path),
+        'status': row['status'],
+    }, ensure_ascii=False, indent=2))
+
+
+def build_parser():
+    p = argparse.ArgumentParser(description='iRemembo MVP')
+    p.add_argument(
+        '--config',
+        default='',
+        help='Path to local-only config JSON (or set IREMEMBO_CONFIG)',
+    )
+    sub = p.add_subparsers(dest='cmd', required=True)
+
+    s = sub.add_parser('init')
+    s.set_defaults(func=cmd_init)
+
+    s = sub.add_parser('add')
+    s.add_argument('image')
+    s.add_argument('--note', default='')
+    s.add_argument('--summary', default='')
+    s.add_argument('--ocr-text', default='')
+    s.add_argument('--tags', default='')
+    s.add_argument('--dates', nargs='*', default=[])
+    s.add_argument('--people', nargs='*', default=[])
+    s.add_argument('--places', nargs='*', default=[])
+    s.add_argument('--objects', nargs='*', default=[])
+    s.add_argument('--embedding-model', default='')
+    s.add_argument('--embedding-ref', default='')
+    s.add_argument('--dropbox-path', default='')
+    s.add_argument('--status', default='draft')
+    s.set_defaults(func=cmd_add)
+
+    s = sub.add_parser('list')
+    s.add_argument('--limit', type=int, default=20)
+    s.set_defaults(func=cmd_list)
+
+    s = sub.add_parser('find')
+    s.add_argument('query')
+    s.add_argument('--limit', type=int, default=10)
+    s.set_defaults(func=cmd_find)
+
+    s = sub.add_parser('upload')
+    s.add_argument('id', type=int)
+    s.set_defaults(func=cmd_upload)
+
+    s = sub.add_parser('fetch')
+    s.add_argument('id', type=int)
+    s.add_argument('--out', default='')
+    s.set_defaults(func=cmd_fetch)
+
+    return p
+
+
+if __name__ == '__main__':
+    args = build_parser().parse_args()
+    args.func(args)
