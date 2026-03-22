@@ -19,6 +19,7 @@
 - `remember-chat` is now the intended interactive ingest path: chat-side image understanding happens first, then fixed analysis JSON is written into iRemembo
 - `remember` remains the CLI ingest path for local/scripted use
 - `remember` / `remember-chat` / `add` do SHA-256-based duplicate detection by default, so the same source image does not keep creating extra rows unless explicitly allowed
+- `remember` / `remember-chat` also act as a reconcile step for an existing row: if the row exists but is missing upload or embedding, the pipeline should fill the missing steps and bring it to the requested final status
 - `add` creates the initial record and retained image when a split workflow is preferred
 - `annotate` is the explicit writeback point for OCR text, summary, tags, entities, and embedding references
 - `inspect` is the lightweight preflight check for “is this image already remembered?”
