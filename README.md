@@ -38,6 +38,7 @@ Suggested path: a local-only folder outside the repo, for example `~/iRemembo-lo
 ```bash
 python3 src/photo_memory.py init
 python3 src/photo_memory.py remember /path/to/image.jpg --auto-analyze --auto-embed
+python3 src/photo_memory.py remember-chat /path/to/image.jpg --analysis-json '{"summary":"示例","tags":["標籤1"],"entities":{"objects":["照片"]},"ocr_text":""}' --auto-embed
 python3 src/photo_memory.py remember /path/to/image.jpg --summary "示例" --tags "標籤1,標籤2" --auto-embed
 python3 src/photo_memory.py add /path/to/image.jpg --summary "示例" --tags "標籤1,標籤2"
 python3 src/photo_memory.py annotate 1 --summary "更新後摘要" --tags "標籤1,標籤2,標籤3"
@@ -49,19 +50,18 @@ python3 src/photo_memory.py fetch 1
 ```
 
 ## Current useful flow
-1. 最簡單：直接用 `remember --auto-analyze --auto-embed` 一次完成建檔＋分析＋上傳 Dropbox
-2. `--auto-analyze` 會嘗試自動產生 `summary` / `tags` / `entities` / `ocr_text`
-3. 分析來源優先順序：`analysis_command` → fallback 空結果
-4. CLI 不會用 OpenAI vision；互動式聊天看圖另算，不走這裡
-5. 若要同時跑向量：`remember ... --auto-embed`
-6. 預設會用 SHA-256 去重，遇到同圖直接回傳既有紀錄；若真的要重建可加 `--dedup allow-new`
-7. 若要拆步驟：`add` 建立本機索引紀錄
-8. `annotate` 寫回 OCR / 摘要 / 標籤 / entities / embedding 參考
-9. `embed` 依據目前 metadata 產生並落地保存 embedding
-10. `inspect` 可先檢查一張圖是否已經在庫裡
-11. `upload` 把縮圖送到 Dropbox
-12. `find` 用關鍵字找圖
-13. `fetch` 把已記住的圖從 Dropbox 拉回本機
+1. 互動式主路徑：聊天裡先看圖，再把結果用 `remember-chat` 寫進 iRemembo
+2. `remember-chat` 吃固定 JSON：`summary / tags / entities / ocr_text`
+3. CLI 裡的 `remember --auto-analyze` 只會跑 `analysis_command`，不會用 OpenAI vision
+4. 若要同時跑向量：`remember-chat ... --auto-embed` 或 `remember ... --auto-embed`
+5. 預設會用 SHA-256 去重，遇到同圖直接回傳既有紀錄；若真的要重建可加 `--dedup allow-new`
+6. 若要拆步驟：`add` 建立本機索引紀錄
+7. `annotate` 寫回 OCR / 摘要 / 標籤 / entities / embedding 參考
+8. `embed` 依據目前 metadata 產生並落地保存 embedding
+9. `inspect` 可先檢查一張圖是否已經在庫裡
+10. `upload` 把縮圖送到 Dropbox
+11. `find` 用關鍵字找圖
+12. `fetch` 把已記住的圖從 Dropbox 拉回本機
 
 ## OCR / analysis / embedding notes
 - OCR 目前是可插拔：

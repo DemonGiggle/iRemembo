@@ -427,33 +427,29 @@ def cmd_annotate(args):
     print(json.dumps(dict(row), ensure_ascii=False, indent=2))
 
 
-def cmd_remember(args):
-    cfg = load_config(resolve_config_path(args.config))
-    ensure_db(cfg)
-    image_path = Path(args.image).expanduser().resolve()
-    if args.auto_ocr and not args.ocr_text:
-        args.ocr_text = maybe_run_ocr(image_path, cfg)
-    if args.auto_analyze:
-        analyzed = analyze_image(image_path, cfg, user_note=args.note, ocr_text=args.ocr_text)
-        if not args.summary:
-            args.summary = analyzed.get('summary', '')
-        if not args.tags:
-            args.tags = ','.join(analyzed.get('tags', []))
-        if not args.ocr_text:
-            args.ocr_text = analyzed.get('ocr_text', '')
-        entities = analyzed.get('entities', {})
-        if not args.dates:
-            args.dates = entities.get('dates', []) or []
-        if not args.times:
-            args.times = entities.get('times', []) or []
-        if not args.people:
-            args.people = entities.get('people', []) or []
-        if not args.places:
-            args.places = entities.get('places', []) or []
-        if not args.organizations:
-            args.organizations = entities.get('organizations', []) or []
-        if not args.objects:
-            args.objects = entities.get('objects', []) or []
+def apply_analysis_to_args(args, analyzed: dict):
+    if not args.summary:
+        args.summary = analyzed.get('summary', '')
+    if not args.tags:
+        args.tags = ','.join(analyzed.get('tags', []))
+    if not args.ocr_text:
+        args.ocr_text = analyzed.get('ocr_text', '')
+    entities = analyzed.get('entities', {})
+    if not args.dates:
+        args.dates = entities.get('dates', []) or []
+    if not args.times:
+        args.times = entities.get('times', []) or []
+    if not args.people:
+        args.people = entities.get('people', []) or []
+    if not args.places:
+        args.places = entities.get('places', []) or []
+    if not args.organizations:
+        args.organizations = entities.get('organizations', []) or []
+    if not args.objects:
+        args.objects = entities.get('objects', []) or []
+
+
+def remember_prepared(args, cfg: dict):
     with sqlite3.connect(cfg['db_path']) as conn:
         prepared = prepare_photo_row(cfg, args)
         existing = find_photo_by_sha(conn, prepared['sha256'])
@@ -481,6 +477,26 @@ def cmd_remember(args):
         'status': args.final_status,
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def cmd_remember(args):
+    cfg = load_config(resolve_config_path(args.config))
+    ensure_db(cfg)
+    image_path = Path(args.image).expanduser().resolve()
+    if args.auto_ocr and not args.ocr_text:
+        args.ocr_text = maybe_run_ocr(image_path, cfg)
+    if args.auto_analyze:
+        analyzed = analyze_image(image_path, cfg, user_note=args.note, ocr_text=args.ocr_text)
+        apply_analysis_to_args(args, analyzed)
+    remember_prepared(args, cfg)
+
+
+def cmd_remember_chat(args):
+    cfg = load_config(resolve_config_path(args.config))
+    ensure_db(cfg)
+    analyzed = normalize_analysis(json.loads(args.analysis_json))
+    apply_analysis_to_args(args, analyzed)
+    remember_prepared(args, cfg)
 
 
 def cmd_embed(args):
@@ -579,6 +595,28 @@ def build_parser():
     s.add_argument('--auto-embed', action='store_true')
     s.add_argument('--dedup', choices=['return-existing', 'allow-new'], default='return-existing')
     s.set_defaults(func=cmd_remember)
+
+    s = sub.add_parser('remember-chat')
+    s.add_argument('image')
+    s.add_argument('--analysis-json', required=True)
+    s.add_argument('--note', default='')
+    s.add_argument('--summary', default='')
+    s.add_argument('--ocr-text', default='')
+    s.add_argument('--tags', default='')
+    s.add_argument('--dates', nargs='*', default=[])
+    s.add_argument('--times', nargs='*', default=[])
+    s.add_argument('--people', nargs='*', default=[])
+    s.add_argument('--places', nargs='*', default=[])
+    s.add_argument('--organizations', nargs='*', default=[])
+    s.add_argument('--objects', nargs='*', default=[])
+    s.add_argument('--embedding-model', default='')
+    s.add_argument('--embedding-ref', default='chat-analysis')
+    s.add_argument('--dropbox-path', default='')
+    s.add_argument('--status', default='annotated')
+    s.add_argument('--final-status', default='uploaded')
+    s.add_argument('--auto-embed', action='store_true')
+    s.add_argument('--dedup', choices=['return-existing', 'allow-new'], default='return-existing')
+    s.set_defaults(func=cmd_remember_chat)
 
     s = sub.add_parser('list')
     s.add_argument('--limit', type=int, default=20)

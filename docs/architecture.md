@@ -16,8 +16,9 @@
 - SQLite DB and thumbnails remain local-only by default
 
 ## Current writeback boundary
-- `remember` is the one-shot ingest path: create record, keep retained image, and upload to Dropbox
-- `remember` / `add` now do SHA-256-based duplicate detection by default, so the same source image does not keep creating extra rows unless explicitly allowed
+- `remember-chat` is now the intended interactive ingest path: chat-side image understanding happens first, then fixed analysis JSON is written into iRemembo
+- `remember` remains the CLI ingest path for local/scripted use
+- `remember` / `remember-chat` / `add` do SHA-256-based duplicate detection by default, so the same source image does not keep creating extra rows unless explicitly allowed
 - `add` creates the initial record and retained image when a split workflow is preferred
 - `annotate` is the explicit writeback point for OCR text, summary, tags, entities, and embedding references
 - `inspect` is the lightweight preflight check for “is this image already remembered?”
@@ -27,7 +28,7 @@
 - OCR is pluggable: local config may define `ocr_command`, otherwise the app tries local `tesseract` if available
 - Analysis is also pluggable: local config may define `analysis_command`
 - If no `analysis_command` is configured, CLI-side image understanding is skipped
-- Interactive chat-side image understanding is a separate path and is intentionally outside this repo CLI flow
+- Interactive chat-side image understanding is the preferred path for remembered photos; `remember-chat` is the writeback bridge into the repo flow
 - Analysis output is normalized into fixed fields:
   - `summary`
   - `tags`
