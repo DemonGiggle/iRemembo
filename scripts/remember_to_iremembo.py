@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from json import JSONDecoder
 from pathlib import Path
 
 
@@ -62,6 +63,25 @@ def build_analysis(args) -> dict:
     return analysis
 
 
+def parse_json_stream(stdout: str) -> list:
+    decoder = JSONDecoder()
+    idx = 0
+    length = len(stdout)
+    payloads = []
+    while idx < length:
+        while idx < length and stdout[idx].isspace():
+            idx += 1
+        if idx >= length:
+            break
+        try:
+            obj, next_idx = decoder.raw_decode(stdout, idx)
+        except json.JSONDecodeError:
+            break
+        payloads.append(obj)
+        idx = next_idx
+    return payloads
+
+
 def run_cli(repo_root: Path, image: Path, analysis: dict, note: str, dedup: str, auto_embed: bool) -> dict:
     cmd = [
         sys.executable,
@@ -77,11 +97,17 @@ def run_cli(repo_root: Path, image: Path, analysis: dict, note: str, dedup: str,
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         fail(result.stderr.strip() or result.stdout.strip() or 'remember-chat failed')
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError:
+
+    payloads = parse_json_stream(result.stdout)
+    if not payloads:
         fail(f'unexpected remember-chat output: {result.stdout.strip()}')
-    return payload
+
+    final_payload = payloads[-1]
+    return {
+        'payload_count': len(payloads),
+        'final': final_payload,
+        'events': payloads[:-1],
+    }
 
 
 def main():
