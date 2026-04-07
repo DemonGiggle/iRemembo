@@ -7,8 +7,8 @@ import sys
 from json import JSONDecoder
 from pathlib import Path
 
-DEFAULT_IREMEMBO_CONFIG = Path('/home/gigo/.config/openclaw-secrets/iremembo.local.json')
-DEFAULT_DROPBOX_CONFIG = Path('/home/gigo/.config/openclaw-secrets/dropbox.json')
+DEFAULT_IREMEMBO_CONFIG = Path.home() / '.config' / 'iremembo' / 'config.json'
+DEFAULT_DROPBOX_CONFIG = Path.home() / '.config' / 'iremembo' / 'dropbox.json'
 
 
 def fail(msg: str, code: int = 1):

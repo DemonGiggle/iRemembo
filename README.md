@@ -38,15 +38,24 @@ Keep these outside the repo:
 ## Setup
 1. Copy `config/example.local.json` to a local-only location.
 2. Fill in your local paths.
-3. Set environment variables.
+3. Either set environment variables, or place local-only config files at the default convention paths.
 4. Initialize the database.
 
-Example:
+Example with environment variables:
 
 ```bash
 export IREMEMBO_CONFIG=~/iRemembo-local/config.json
 export DROPBOX_CONFIG=~/secrets/dropbox.json
 python3 src/photo_memory.py init
+```
+
+Example with default local convention paths:
+
+```bash
+mkdir -p ~/.config/iremembo
+cp config/example.local.json ~/.config/iremembo/config.json
+# put your Dropbox secret JSON at ~/.config/iremembo/dropbox.json
+python3 src/photo_memory.py init --config ~/.config/iremembo/config.json
 ```
 
 ## Main commands
@@ -86,6 +95,7 @@ The actual embedding vector is stored in `photo_embeddings`.
 - Embeddings currently use OpenAI `/v1/embeddings` when enabled.
 - Duplicate detection is SHA-256 based.
 - Retrieval now has two layers: `find` for plain keyword matching, and `search --semantic` for embedding-based ranking.
+- `scripts/remember_to_iremembo.py` prefers explicit env vars, but if they are absent it will also look for local-only files at `~/.config/iremembo/config.json` and `~/.config/iremembo/dropbox.json`.
 
 ## Config example
 ```json
