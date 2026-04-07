@@ -7,20 +7,26 @@ import sys
 from json import JSONDecoder
 from pathlib import Path
 
+DEFAULT_IREMEMBO_CONFIG = Path('/home/gigo/.config/openclaw-secrets/iremembo.local.json')
+DEFAULT_DROPBOX_CONFIG = Path('/home/gigo/.config/openclaw-secrets/dropbox.json')
+
 
 def fail(msg: str, code: int = 1):
     print(json.dumps({"ok": False, "error": msg}, ensure_ascii=False, indent=2), file=sys.stderr)
     raise SystemExit(code)
 
 
-def resolve_required_file(path_str: str, env_name: str) -> Path:
+def resolve_required_file(path_str: str, env_name: str, default_path: Path | None = None) -> Path:
     raw = path_str or os.environ.get(env_name, '')
-    if not raw:
-        fail(f'{env_name} is required')
-    path = Path(raw).expanduser().resolve()
-    if not path.exists():
-        fail(f'{env_name} not found: {path}')
-    return path
+    if raw:
+        path = Path(raw).expanduser().resolve()
+        if not path.exists():
+            fail(f'{env_name} not found: {path}')
+        return path
+    if default_path and default_path.exists():
+        os.environ[env_name] = str(default_path)
+        return default_path
+    fail(f'{env_name} is required')
 
 
 def resolve_image(path_str: str) -> Path:
@@ -129,8 +135,8 @@ def main():
     args = p.parse_args()
 
     repo_root = Path(__file__).resolve().parents[1]
-    resolve_required_file('', 'IREMEMBO_CONFIG')
-    resolve_required_file('', 'DROPBOX_CONFIG')
+    resolve_required_file('', 'IREMEMBO_CONFIG', DEFAULT_IREMEMBO_CONFIG)
+    resolve_required_file('', 'DROPBOX_CONFIG', DEFAULT_DROPBOX_CONFIG)
     image = resolve_image(args.image)
     analysis = build_analysis(args)
     payload = run_cli(
