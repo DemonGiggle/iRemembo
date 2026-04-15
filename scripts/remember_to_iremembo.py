@@ -109,10 +109,19 @@ def run_cli(repo_root: Path, image: Path, analysis: dict, note: str, dedup: str,
         fail(f'unexpected remember-chat output: {result.stdout.strip()}')
 
     final_payload = payloads[-1]
+    if not isinstance(final_payload, dict):
+        fail(f'unexpected remember-chat payload: {final_payload!r}')
+    if final_payload.get('status') != 'uploaded':
+        fail(f"remember-chat did not finish durably: {json.dumps(final_payload, ensure_ascii=False)}")
+    if not final_payload.get('dropbox_path'):
+        fail(f"remember-chat returned no dropbox_path: {json.dumps(final_payload, ensure_ascii=False)}")
+    if not final_payload.get('id'):
+        fail(f"remember-chat returned no record id: {json.dumps(final_payload, ensure_ascii=False)}")
     return {
         'payload_count': len(payloads),
         'final': final_payload,
         'events': payloads[:-1],
+        'command': cmd,
     }
 
 
@@ -147,10 +156,18 @@ def main():
         dedup=args.dedup,
         auto_embed=not args.no_auto_embed,
     )
+    final_payload = payload['final']
     print(json.dumps({
         'ok': True,
         'image': str(image),
         'summary': analysis['summary'],
+        'id': final_payload['id'],
+        'dropbox_path': final_payload['dropbox_path'],
+        'status': final_payload['status'],
+        'dedup': bool(final_payload.get('dedup')),
+        'repaired_dropbox': bool(final_payload.get('repaired_dropbox')),
+        'embedding_model': final_payload.get('embedding_model', ''),
+        'embedding_ref': final_payload.get('embedding_ref', ''),
         'result': payload,
     }, ensure_ascii=False, indent=2))
 

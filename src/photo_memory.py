@@ -292,15 +292,53 @@ def insert_photo(conn, cfg: dict, args) -> dict:
     return {'id': cur.lastrowid, **row}
 
 
-def upload_photo(cfg: dict, photo_id: int, image_path: str, dropbox_path: str, status: str = 'uploaded'):
-    src = Path(image_path).expanduser().resolve()
-    sha = sha256_file(src)
-    thumb = make_thumb(src, Path(cfg['thumb_dir']), sha)
-    subprocess.run([
-        sys.executable, cfg['dropbox_tool'], 'upload', str(thumb), dropbox_path, '--overwrite'
-    ], check=True)
+def run_dropbox_tool(cfg: dict, *tool_args: str, capture_output: bool = False):
+    return subprocess.run(
+        [sys.executable, cfg['dropbox_tool'], *tool_args],
+        check=True,
+        text=True,
+        capture_output=capture_output,
+    )
+
+
+def upload_thumb(cfg: dict, thumb_path: Path, dropbox_path: str):
+    run_dropbox_tool(cfg, 'upload', str(thumb_path), dropbox_path, '--overwrite')
+
+
+def dropbox_path_exists(cfg: dict, dropbox_path: str) -> bool:
+    try:
+        run_dropbox_tool(cfg, 'stat', dropbox_path, capture_output=True)
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
+def delete_dropbox_path(cfg: dict, dropbox_path: str):
+    try:
+        run_dropbox_tool(cfg, 'delete', dropbox_path, capture_output=True)
+    except subprocess.CalledProcessError:
+        pass
+
+
+def finalize_photo_status(cfg: dict, photo_id: int, status: str):
     with sqlite3.connect(cfg['db_path']) as conn:
         conn.execute('UPDATE photos SET status = ?, noted_at = ? WHERE id = ?', (status, utc_now(), photo_id))
+        conn.commit()
+
+
+def set_photo_embedding_fields(cfg: dict, photo_id: int, model: str, embedding_ref: str):
+    with sqlite3.connect(cfg['db_path']) as conn:
+        conn.execute(
+            'UPDATE photos SET embedding_model = ?, embedding_ref = ?, noted_at = ? WHERE id = ?',
+            (model, embedding_ref, utc_now(), photo_id),
+        )
+        conn.commit()
+
+
+def delete_photo_record(cfg: dict, photo_id: int):
+    with sqlite3.connect(cfg['db_path']) as conn:
+        conn.execute('DELETE FROM photo_embeddings WHERE photo_id = ?', (photo_id,))
+        conn.execute('DELETE FROM photos WHERE id = ?', (photo_id,))
         conn.commit()
 
 
@@ -484,24 +522,67 @@ def apply_analysis_to_args(args, analyzed: dict):
 
 
 def remember_prepared(args, cfg: dict):
+    prepared = prepare_photo_row(cfg, args)
+    image_path = Path(args.image).expanduser().resolve()
+    thumb_path = make_thumb(image_path, Path(cfg['thumb_dir']), prepared['sha256'])
+
     with sqlite3.connect(cfg['db_path']) as conn:
-        prepared = prepare_photo_row(cfg, args)
         existing = find_photo_by_sha(conn, prepared['sha256'])
-        if existing and args.dedup == 'return-existing':
-            print(json.dumps({'dedup': True, 'record': dict(existing)}, ensure_ascii=False, indent=2))
-            return
-        row = insert_photo(conn, cfg, args)
-    if args.auto_embed:
-        row = maybe_embed_photo(cfg, row, model_hint=args.embedding_model)
-    upload_photo(cfg, row['id'], args.image, row['dropbox_path'], status=args.final_status)
-    row['status'] = args.final_status
+
+    if existing and args.dedup == 'return-existing':
+        row = dict(existing)
+        repaired = False
+        if not dropbox_path_exists(cfg, row['dropbox_path']):
+            upload_thumb(cfg, thumb_path, row['dropbox_path'])
+            repaired = True
+        if row.get('status') != args.final_status or repaired:
+            finalize_photo_status(cfg, row['id'], args.final_status)
+            row['status'] = args.final_status
+        result = {
+            'id': row['id'],
+            'summary': row.get('summary', ''),
+            'dropbox_path': row['dropbox_path'],
+            'embedding_model': row.get('embedding_model', ''),
+            'embedding_ref': row.get('embedding_ref', ''),
+            'status': row['status'],
+            'dedup': True,
+            'repaired_dropbox': repaired,
+        }
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+    row = None
+    uploaded = False
+    try:
+        upload_thumb(cfg, thumb_path, prepared['dropbox_path'])
+        uploaded = True
+        with sqlite3.connect(cfg['db_path']) as conn:
+            cols = ', '.join(prepared.keys())
+            qs = ', '.join('?' for _ in prepared)
+            cur = conn.execute(f'INSERT INTO photos ({cols}) VALUES ({qs})', tuple(prepared.values()))
+            conn.commit()
+            row = {'id': cur.lastrowid, **prepared}
+        if args.auto_embed:
+            row = maybe_embed_photo(cfg, row, model_hint=args.embedding_model)
+            if row.get('embedding_model') or row.get('embedding_ref'):
+                set_photo_embedding_fields(cfg, row['id'], row.get('embedding_model', ''), row.get('embedding_ref', ''))
+        finalize_photo_status(cfg, row['id'], args.final_status)
+        row['status'] = args.final_status
+    except Exception as e:
+        if row and row.get('id'):
+            delete_photo_record(cfg, row['id'])
+        if uploaded:
+            delete_dropbox_path(cfg, prepared['dropbox_path'])
+        raise SystemExit(f'atomic remember failed: {e}')
+
     result = {
         'id': row['id'],
         'summary': row['summary'],
         'dropbox_path': row['dropbox_path'],
-        'embedding_model': row['embedding_model'],
-        'embedding_ref': row['embedding_ref'],
+        'embedding_model': row.get('embedding_model', ''),
+        'embedding_ref': row.get('embedding_ref', ''),
         'status': args.final_status,
+        'dedup': False,
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

@@ -63,6 +63,7 @@ python3 src/photo_memory.py init --config ~/.config/iremembo/config.json
 ```bash
 python3 src/photo_memory.py init
 python3 src/photo_memory.py remember-chat /path/to/image.jpg --analysis-json '{"summary":"示例","tags":["標籤1"],"entities":{"objects":["照片"]},"ocr_text":""}' --auto-embed
+python3 scripts/remember_to_iremembo.py /path/to/image.jpg --analysis-json '{"summary":"示例","tags":["標籤1"],"entities":{"objects":["照片"]},"ocr_text":""}'
 python3 src/photo_memory.py remember /path/to/image.jpg --summary "示例" --tags "標籤1,標籤2" --auto-embed
 python3 src/photo_memory.py add /path/to/image.jpg --summary "示例" --tags "標籤1,標籤2"
 python3 src/photo_memory.py annotate 1 --summary "更新後摘要" --tags "標籤1,標籤2,標籤3"
@@ -94,6 +95,7 @@ The actual embedding vector is stored in `photo_embeddings`.
 - CLI does not use OpenAI vision fallback.
 - Embeddings currently use OpenAI `/v1/embeddings` when enabled.
 - Duplicate detection is SHA-256 based.
+- `remember` / `remember-chat` are atomic from the assistant's perspective: success means the DB row exists and the Dropbox file is present. If upload or later write steps fail, the command exits non-zero and compensates by cleaning up partial writes where possible.
 - Retrieval now has two layers: `find` for plain keyword matching, and `search --semantic` for embedding-based ranking.
 - `scripts/remember_to_iremembo.py` prefers explicit env vars, but if they are absent it will also look for local-only files at `~/.config/iremembo/config.json` and `~/.config/iremembo/dropbox.json`.
 

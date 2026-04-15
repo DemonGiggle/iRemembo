@@ -161,6 +161,12 @@ def cmd_upload(args):
     print(json.dumps(resp, ensure_ascii=False, indent=2))
 
 
+def cmd_stat(args):
+    cfg = load_cfg()
+    resp = api_json('/files/get_metadata', cfg, {'path': args.path})
+    print(json.dumps(resp, ensure_ascii=False, indent=2))
+
+
 def cmd_download(args):
     cfg = load_cfg()
     data, headers = api_content_download('/files/download', cfg, {'path': args.remote})
@@ -185,6 +191,12 @@ def cmd_share(args):
     print(resp['url'])
 
 
+def cmd_delete(args):
+    cfg = load_cfg()
+    resp = api_json('/files/delete_v2', cfg, {'path': args.path})
+    print(json.dumps(resp, ensure_ascii=False, indent=2))
+
+
 def main():
     p = argparse.ArgumentParser(description='Simple Dropbox helper for local automation')
     sub = p.add_subparsers(dest='cmd', required=True)
@@ -202,6 +214,10 @@ def main():
     s.add_argument('--overwrite', action='store_true')
     s.set_defaults(func=cmd_upload)
 
+    s = sub.add_parser('stat')
+    s.add_argument('path')
+    s.set_defaults(func=cmd_stat)
+
     s = sub.add_parser('download')
     s.add_argument('remote')
     s.add_argument('local')
@@ -210,6 +226,10 @@ def main():
     s = sub.add_parser('share')
     s.add_argument('path')
     s.set_defaults(func=cmd_share)
+
+    s = sub.add_parser('delete')
+    s.add_argument('path')
+    s.set_defaults(func=cmd_delete)
 
     args = p.parse_args()
     args.func(args)

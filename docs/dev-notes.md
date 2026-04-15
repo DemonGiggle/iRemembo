@@ -19,5 +19,5 @@ This file holds implementation notes that do not belong in the public-facing REA
 
 ## Dev-mode assumptions
 - Fail-fast is preferred during development.
-- No reconcile/migration behavior for partial rows unless explicitly reintroduced later.
+- Remember flows now compensate on failure: upload is part of success, and duplicate rows are revalidated against Dropbox before the CLI reports success.
 - Resetting the dev DB is acceptable while iterating.
