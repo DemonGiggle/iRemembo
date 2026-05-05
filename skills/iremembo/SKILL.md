@@ -26,6 +26,7 @@ Examples that should trigger this skill:
 - Write only when the user explicitly asks to remember/store an image.
 - Do not query iRemembo on every turn; use it only when the conversation suggests recall of a previously remembered image/item.
 - Treat chat-side image understanding and iRemembo persistence as separate steps.
+- When the chat model can directly read visible text in the image, treat that as valid OCR for this flow and put it into `ocr_text`.
 - Prefer the single-entry wrapper `scripts/remember_to_iremembo.py` for write/ingest flows.
 - `memory/YYYY-MM-DD.md` may be updated as a supporting note, but only **after** iRemembo write success or after clearly reporting a partial failure.
 - Never tell the user `記好了` unless the iRemembo command actually succeeded.
@@ -50,6 +51,7 @@ If the user explicitly wants to remember an image:
    - `tags`
    - `entities`
    - `ocr_text`
+   - If visible text is legible, extract it directly with the model and include it in `ocr_text`; leave `ocr_text` empty only when there is no meaningful visible text or it is too uncertain to trust.
 2. Run the single-entry wrapper:
 
 ```bash

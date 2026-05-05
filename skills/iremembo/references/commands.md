@@ -34,7 +34,7 @@ python3 src/photo_memory.py remember-chat /path/to/image.jpg \
     "organizations": [],
     "objects": []
   },
-  "ocr_text": "可留空"
+  "ocr_text": "優先填入模型直接讀到的圖片文字；真的沒有或不可信時才留空"
 }
 ```
 
@@ -42,6 +42,7 @@ Notes:
 - Missing fields should be supplied as empty arrays/empty string where practical.
 - Keep tags concise.
 - Prefer concrete nouns in `objects`.
+- For chat-driven remember flow, fill `ocr_text` from the model's own image reading.
 
 ## Search commands
 

@@ -4,6 +4,5 @@
   "dropbox_base": "/photo-memory",
   "dropbox_tool": "/ABSOLUTE/PATH/TO/iRemembo/scripts/dropbox_tool.py",
   "embedding_model": "text-embedding-3-small",
-  "ocr_command": [],
   "analysis_command": []
 }

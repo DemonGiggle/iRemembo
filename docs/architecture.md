@@ -24,13 +24,13 @@
 - `add` creates the initial record when a split workflow is preferred
 - `annotate` is the explicit writeback point for OCR text, summary, tags, entities, and embedding references
 - `inspect` is the lightweight preflight check for “is this image already remembered?”
-- This keeps later vision/OCR pipelines replaceable without changing DB ownership flow
+- This keeps later analysis pipelines replaceable without changing DB ownership flow
 
 ## OCR / analysis / embedding boundary
-- OCR is pluggable: local config may define `ocr_command`, otherwise the app tries local `tesseract` if available
 - Analysis is also pluggable: local config may define `analysis_command`
 - If no `analysis_command` is configured, CLI-side image understanding is skipped
 - Interactive chat-side image understanding is the preferred path for remembered photos; `remember-chat` is the writeback bridge into the repo flow
+- In that interactive path, `ocr_text` should come from the controlling model's own image understanding when visible text is readable
 - Analysis output is normalized into fixed fields:
   - `summary`
   - `tags`

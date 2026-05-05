@@ -12,7 +12,7 @@ This file holds implementation notes that do not belong in the public-facing REA
 - `remember-chat` is the main bridge from chat-side analysis into the local DB.
 - `remember` remains available for local/scripted use.
 - CLI auto-analysis only uses `analysis_command` if configured.
-- No CLI OpenAI vision fallback.
+- The chat/controller model should fill `ocr_text` itself when it can read image text.
 - Embeddings are optional and stored in local SQLite table `photo_embeddings`.
 - Duplicate detection is SHA-256 based.
 - Current schema keeps Dropbox path and metadata only; local source/thumb paths are not stored in DB.

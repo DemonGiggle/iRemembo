@@ -92,7 +92,7 @@ The actual embedding vector is stored in `photo_embeddings`.
 
 ## Notes
 - CLI-side auto analysis is pluggable through `analysis_command`.
-- CLI does not use OpenAI vision fallback.
+- In the interactive remember flow, the controlling chat model is expected to provide `ocr_text` directly when it can read visible text from the image.
 - Embeddings currently use OpenAI `/v1/embeddings` when enabled.
 - Duplicate detection is SHA-256 based.
 - `remember` / `remember-chat` are atomic from the assistant's perspective: success means the DB row exists and the Dropbox file is present. If upload or later write steps fail, the command exits non-zero and compensates by cleaning up partial writes where possible.
@@ -107,7 +107,6 @@ The actual embedding vector is stored in `photo_embeddings`.
   "dropbox_base": "/photo-memory",
   "dropbox_tool": "/absolute/path/to/iRemembo/scripts/dropbox_tool.py",
   "embedding_model": "text-embedding-3-small",
-  "ocr_command": [],
   "analysis_command": []
 }
 ```
