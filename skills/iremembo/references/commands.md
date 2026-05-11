@@ -20,6 +20,25 @@ python3 src/photo_memory.py remember-chat /path/to/image.jpg \
   --auto-embed
 ```
 
+Success payloads use a shared machine-readable envelope:
+
+```json
+{
+  "ok": true,
+  "command": "remember-chat"
+}
+```
+
+Failure payloads are emitted on stderr:
+
+```json
+{
+  "ok": false,
+  "command": "remember-chat",
+  "error": "..."
+}
+```
+
 ### Expected analysis JSON shape
 
 ```json
@@ -44,6 +63,22 @@ Notes:
 - Prefer concrete nouns in `objects`.
 - For chat-driven remember flow, fill `ocr_text` from the model's own image reading.
 
+## Doctor / setup validation
+
+Use this to validate local plugin readiness before retrying failing remember/recall flows.
+
+```bash
+python3 src/photo_memory.py doctor
+python3 src/photo_memory.py --config /path/to/config.json doctor --dropbox-config /path/to/dropbox.json
+```
+
+Checks include:
+- config file resolution
+- Dropbox config resolution
+- writable DB/thumb directories
+- safe send-back directory
+- local dependency visibility for tools like `ffmpeg` and `tesseract`
+
 ## Search commands
 
 ### Plain keyword matching
@@ -58,6 +93,11 @@ python3 src/photo_memory.py search 關鍵字
 ```bash
 python3 src/photo_memory.py search 關鍵字 --semantic
 ```
+
+`find`, `search`, `fetch`, `recall`, `inspect`, `doctor`, and `remember-chat` all return JSON with:
+- `ok`
+- `command`
+- command-specific fields such as `results`, `match`, `fetched`, `status`, or `error`
 
 Use semantic search when the user describes the thing indirectly rather than by exact visible text.
 
@@ -91,7 +131,7 @@ Then send it through the messaging tool.
 
 ### `DROPBOX_CONFIG` missing
 Meaning: Dropbox helper cannot authenticate.
-Action: set the environment variable correctly and retry.
+Action: set the environment variable correctly, or place the file at the default local path, then rerun `python3 src/photo_memory.py doctor`.
 
 ### `--analysis-json` missing
 Meaning: `remember-chat` cannot run without structured chat-side analysis.

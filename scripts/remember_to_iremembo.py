@@ -12,7 +12,7 @@ DEFAULT_DROPBOX_CONFIG = Path.home() / '.config' / 'iremembo' / 'dropbox.json'
 
 
 def fail(msg: str, code: int = 1):
-    print(json.dumps({"ok": False, "error": msg}, ensure_ascii=False, indent=2), file=sys.stderr)
+    print(json.dumps({"ok": False, "command": "remember-to-iremembo", "error": msg}, ensure_ascii=False, indent=2), file=sys.stderr)
     raise SystemExit(code)
 
 
@@ -88,6 +88,15 @@ def parse_json_stream(stdout: str) -> list:
     return payloads
 
 
+def parse_json_payload(raw: str):
+    if not raw.strip():
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+
 def run_cli(repo_root: Path, image: Path, analysis: dict, note: str, dedup: str, auto_embed: bool) -> dict:
     cmd = [
         sys.executable,
@@ -102,6 +111,9 @@ def run_cli(repo_root: Path, image: Path, analysis: dict, note: str, dedup: str,
         cmd.append('--auto-embed')
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
+        stderr_payload = parse_json_payload(result.stderr)
+        if isinstance(stderr_payload, dict) and stderr_payload.get('error'):
+            fail(stderr_payload['error'])
         fail(result.stderr.strip() or result.stdout.strip() or 'remember-chat failed')
 
     payloads = parse_json_stream(result.stdout)
@@ -159,6 +171,7 @@ def main():
     final_payload = payload['final']
     print(json.dumps({
         'ok': True,
+        'command': 'remember-to-iremembo',
         'image': str(image),
         'summary': analysis['summary'],
         'id': final_payload['id'],

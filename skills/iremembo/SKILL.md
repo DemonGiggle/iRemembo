@@ -114,7 +114,7 @@ python3 src/photo_memory.py fetch 2 \
 ## Failure handling
 
 - If the wrapper or `remember-chat` fails before upload, report partial state clearly instead of pretending the flow completed.
-- If `IREMEMBO_CONFIG` or `DROPBOX_CONFIG` is missing, first check the wrapper fallback convention paths `~/.config/iremembo/config.json` and `~/.config/iremembo/dropbox.json`, then fix config rather than retrying blindly.
+- If `IREMEMBO_CONFIG` or `DROPBOX_CONFIG` is missing, first check the wrapper fallback convention paths `~/.config/iremembo/config.json` and `~/.config/iremembo/dropbox.json`, then run `python3 src/photo_memory.py doctor` before retrying blindly.
 - If messaging rejects a local file path, fetch/recall to the safe send directory and send from there.
 - If search returns no match, say so plainly instead of guessing.
 - If multiple matches are similarly plausible, ask a short narrowing question rather than dumping all internal steps.
