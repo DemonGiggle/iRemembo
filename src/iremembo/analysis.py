@@ -116,7 +116,7 @@ def build_embedding_input(summary: str, ocr_text: str, tags_json: str, entities_
 def create_embedding(text: str, model: str) -> tuple[str, list[float]]:
     api_key = os.environ.get('OPENAI_API_KEY', '')
     if not api_key:
-        raise SystemExit('OPENAI_API_KEY is required for embeddings')
+        raise RuntimeError('OPENAI_API_KEY is required for embeddings')
     payload = json.dumps({'model': model, 'input': text}).encode()
     req = urllib.request.Request(
         'https://api.openai.com/v1/embeddings',
@@ -132,7 +132,7 @@ def create_embedding(text: str, model: str) -> tuple[str, list[float]]:
             resp = json.load(r)
     except urllib.error.HTTPError as e:
         msg = e.read().decode()
-        raise SystemExit(f'embedding request failed: {e.code} {msg}')
+        raise RuntimeError(f'embedding request failed: {e.code} {msg}')
     vector = resp['data'][0]['embedding']
     return model, vector
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 DEFAULT_IREMEMBO_CONFIG = Path.home() / '.config' / 'iremembo' / 'config.json'
 DEFAULT_DROPBOX_CONFIG = Path.home() / '.config' / 'iremembo' / 'dropbox.json'
-DEFAULT_SAFE_SEND_DIR = Path('/home/gigo/.openclaw/workspace/tmp/iremembo-send')
+DEFAULT_SAFE_SEND_DIR = Path.home() / '.openclaw' / 'workspace' / 'tmp' / 'iremembo-send'
 
 
 def resolve_file_candidate(raw: str, env_name: str, default_path: Path) -> dict:

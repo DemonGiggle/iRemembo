@@ -323,20 +323,37 @@ def run_search(cfg: dict, query_text: str, semantic: bool = False, model: str = 
         raise SystemExit('query is required')
 
     q = f'%{query_text}%'
+    candidate_limit = max(limit * 5, 50)
     with sqlite3.connect(cfg['db_path']) as conn:
         conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            '''
-            SELECT p.id, p.noted_at, p.summary, p.user_note, p.ocr_text, p.tags_json,
-                   p.entities_json, p.dropbox_path, p.status,
-                   e.model AS embedding_model, e.input_text, e.vector_json
-            FROM photos p
-            LEFT JOIN photo_embeddings e ON e.photo_id = p.id
-            WHERE p.summary LIKE ? OR p.user_note LIKE ? OR p.ocr_text LIKE ? OR p.tags_json LIKE ? OR p.entities_json LIKE ? OR e.input_text LIKE ?
-            ORDER BY p.id DESC
-            ''',
-            (q, q, q, q, q, q),
-        ).fetchall()
+        if semantic:
+            rows = conn.execute(
+                '''
+                SELECT p.id, p.noted_at, p.summary, p.user_note, p.ocr_text, p.tags_json,
+                       p.entities_json, p.dropbox_path, p.status,
+                       e.model AS embedding_model, e.input_text, e.vector_json
+                FROM photos p
+                LEFT JOIN photo_embeddings e ON e.photo_id = p.id
+                WHERE p.summary LIKE ? OR p.user_note LIKE ? OR p.ocr_text LIKE ? OR p.tags_json LIKE ? OR p.entities_json LIKE ? OR e.input_text LIKE ?
+                ORDER BY p.id DESC
+                LIMIT ?
+                ''',
+                (q, q, q, q, q, q, candidate_limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                '''
+                SELECT p.id, p.noted_at, p.summary, p.user_note, p.ocr_text, p.tags_json,
+                       p.entities_json, p.dropbox_path, p.status,
+                       e.model AS embedding_model, e.input_text
+                FROM photos p
+                LEFT JOIN photo_embeddings e ON e.photo_id = p.id
+                WHERE p.summary LIKE ? OR p.user_note LIKE ? OR p.ocr_text LIKE ? OR p.tags_json LIKE ? OR p.entities_json LIKE ? OR e.input_text LIKE ?
+                ORDER BY p.id DESC
+                LIMIT ?
+                ''',
+                (q, q, q, q, q, q, candidate_limit),
+            ).fetchall()
 
     query_model = ''
     query_vector = []
