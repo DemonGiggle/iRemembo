@@ -13,6 +13,32 @@ The intended primary workflow is interactive:
 3. chat-side image understanding produces structured metadata
 4. iRemembo writes that metadata into the local DB and uploads the retained image copy to Dropbox
 
+## OpenClaw plugin install target
+
+The repo is being refactored so it can be installed directly as an OpenClaw plugin from the repository path:
+
+```bash
+openclaw plugins install ./iRemembo
+```
+
+OpenClaw-facing assets in this repo:
+- skill entrypoint: `skills/iremembo/SKILL.md`
+- command reference: `skills/iremembo/references/commands.md`
+- write wrapper: `scripts/remember_to_iremembo.py`
+- CLI entrypoint: `src/photo_memory.py`
+
+For operator readiness checks, use:
+
+```bash
+python3 src/photo_memory.py doctor
+```
+
+If you do not use the default local config paths, pass the config path before the subcommand:
+
+```bash
+python3 src/photo_memory.py --config /path/to/config.json doctor --dropbox-config /path/to/dropbox.json
+```
+
 ## What the project does
 - remembers only images explicitly marked to keep
 - stores image identity by `dropbox_path`
@@ -62,6 +88,7 @@ python3 src/photo_memory.py init --config ~/.config/iremembo/config.json
 
 ```bash
 python3 src/photo_memory.py init
+python3 src/photo_memory.py doctor
 python3 src/photo_memory.py remember-chat /path/to/image.jpg --analysis-json '{"summary":"示例","tags":["標籤1"],"entities":{"objects":["照片"]},"ocr_text":""}' --auto-embed
 python3 scripts/remember_to_iremembo.py /path/to/image.jpg --analysis-json '{"summary":"示例","tags":["標籤1"],"entities":{"objects":["照片"]},"ocr_text":""}'
 python3 src/photo_memory.py remember /path/to/image.jpg --summary "示例" --tags "標籤1,標籤2" --auto-embed
@@ -74,6 +101,24 @@ python3 src/photo_memory.py search 關鍵字
 python3 src/photo_memory.py search 關鍵字 --semantic
 python3 src/photo_memory.py fetch 1
 ```
+
+Plugin-facing commands such as `remember-chat`, `find`, `search`, `fetch`, `recall`, `inspect`, and `doctor` emit JSON on stdout for success and JSON on stderr for failures.
+
+## OpenClaw operator flow
+
+1. Install the plugin from the repo path with `openclaw plugins install ./iRemembo`.
+2. Put local-only config at `~/.config/iremembo/config.json` and Dropbox secrets at `~/.config/iremembo/dropbox.json`, or export `IREMEMBO_CONFIG` / `DROPBOX_CONFIG`.
+3. Run `python3 src/photo_memory.py doctor` until readiness checks pass.
+4. Use `scripts/remember_to_iremembo.py` for OpenClaw remember/write flows.
+5. Use `src/photo_memory.py search`, `recall`, and `fetch` for lookup and send-back flows.
+
+## Troubleshooting
+
+- `config path required` or `IREMEMBO_CONFIG is required`: set `IREMEMBO_CONFIG` or create `~/.config/iremembo/config.json`.
+- `DROPBOX_CONFIG is required` or Dropbox config missing: set `DROPBOX_CONFIG` or create `~/.config/iremembo/dropbox.json`, then rerun `python3 src/photo_memory.py doctor`.
+- Safe send path rejected by chat tooling: fetch or recall into `/home/gigo/.openclaw/workspace/tmp/iremembo-send/`.
+- `doctor` reports unwritable DB or thumb paths: point `db_path` and `thumb_dir` at local writable directories outside the repo.
+- `remember-chat` fails: inspect the stderr JSON error payload instead of treating the write as successful.
 
 ## Data model
 The `photos` table keeps:
@@ -98,6 +143,16 @@ The actual embedding vector is stored in `photo_embeddings`.
 - `remember` / `remember-chat` are atomic from the assistant's perspective: success means the DB row exists and the Dropbox file is present. If upload or later write steps fail, the command exits non-zero and compensates by cleaning up partial writes where possible.
 - Retrieval now has two layers: `find` for plain keyword matching, and `search --semantic` for embedding-based ranking.
 - `scripts/remember_to_iremembo.py` prefers explicit env vars, but if they are absent it will also look for local-only files at `~/.config/iremembo/config.json` and `~/.config/iremembo/dropbox.json`.
+
+## Testing and CI
+
+Run the regression suite with:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+GitHub Actions runs the same suite on pull requests.
 
 ## Config example
 ```json
